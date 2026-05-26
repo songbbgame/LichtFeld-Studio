@@ -6141,6 +6141,8 @@ namespace lfs::vis::gui {
             return true;
         if (ui_layout_settle_frames_ > 0)
             return true;
+        if (rml_viewport_overlay_.needsAnimationFrame())
+            return true;
         if (rml_right_panel_.needsAnimationFrame())
             return true;
         if (PanelRegistry::instance().needsAnimationFrame())

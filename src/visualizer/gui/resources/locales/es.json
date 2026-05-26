@@ -46,6 +46,12 @@
     "preferences": "Preferencias",
     "histogram": "Histogram"
   },
+  "toolbar": {
+    "local_space": "Espacio local",
+    "world_space": "Espacio mundial",
+    "origin_pivot": "Origen",
+    "bounds_center_pivot": "Centro de límites"
+  },
   "getting_started": {
     "title": "Primeros Pasos",
     "description": "Aprenda a preparar datasets y comenzar con LichtFeld Studio:",
@@ -61,6 +67,23 @@
   "input_settings": {
     "conflict_message": "{trigger} ya está asignado a {action} en {mode}. ¿Reemplazar esta asignación?",
     "conflict_inline": "{binding}  ⚠ también: {action}"
+  },
+  "tooltip": {
+    "transform_position_axis": "Trasladar la selección a lo largo de este eje",
+    "transform_rotation_axis": "Rotar la selección alrededor de este eje (grados)",
+    "transform_scale_axis": "Escalar la selección a lo largo de este eje",
+    "transform_scale_uniform": "Escala uniforme en todos los ejes",
+    "transform_reset": "Restablecer la transformación a identidad",
+    "transform_bake": "Aplicar la transformación actual",
+    "transform_panel": "Transformar objetos seleccionados de la escena",
+    "transform_tool": "Herramienta de transformación activa",
+    "transform_target": "Objetivo de transformación seleccionado",
+    "transform_space": "Elegir espacio de transformación local o mundial",
+    "transform_axis": "Elegir eje de espejo",
+    "transform_pivot": "Elegir el pivote usado para las transformaciones",
+    "transform_position": "Valores de posición para el objetivo seleccionado",
+    "transform_rotation": "Valores de rotación para el objetivo seleccionado",
+    "transform_scale": "Valores de escala para el objetivo seleccionado"
   },
   "about": {
     "title": "LICHTFELD STUDIO",
