@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "gui/panel_layout.hpp"
+#include "core/logger.hpp"
 #include "gui/panels/python_console_panel.hpp"
 #include "python/python_runtime.hpp"
 #include "theme/theme.hpp"
@@ -60,7 +61,6 @@ namespace lfs::vis::gui {
             return false;
 
         tab_scroll_offset_ = 0.0f;
-        background_preload_index_ = 0;
         return true;
     }
 
@@ -70,6 +70,7 @@ namespace lfs::vis::gui {
                                               std::string& focus_panel_name,
                                               const PanelInputState& input,
                                               const ScreenState& screen) {
+        LOG_TIMER("gui_render.panel_layout.renderRightPanel");
         cursor_request_ = CursorRequest::None;
 
         if (!show_main_panel || ui_hidden || screen.work_size.x <= 0 || screen.work_size.y <= 0) {
@@ -121,6 +122,7 @@ namespace lfs::vis::gui {
         const float console_x = right_panel_x - (python_console_visible ? python_console_width_ + PANEL_GAP : 0.0f);
 
         if (python_console_visible) {
+            LOG_TIMER("gui_render.panel_layout.right_panel.python_console");
             renderDockedPythonConsole(ctx, console_x, std::max(0.0f, panel_h - bottom_dock_h),
                                       masked_panel_input, screen);
         } else {
@@ -142,12 +144,22 @@ namespace lfs::vis::gui {
 
         const float scene_h = std::max(min_h, avail_h * scene_panel_ratio_ - splitter_h * 0.5f);
 
-        reg.preload_panels_direct(PanelSpace::SceneHeader, content_w, scene_h, draw_ctx,
-                                  -1.0f, -1.0f, &masked_panel_input);
-        reg.draw_panels_direct(PanelSpace::SceneHeader, content_x, content_top,
-                               content_w, scene_h, draw_ctx, &masked_panel_input);
+        {
+            LOG_TIMER("gui_render.panel_layout.scene_header.preload");
+            reg.preload_panels_direct(PanelSpace::SceneHeader, content_w, scene_h, draw_ctx,
+                                      -1.0f, -1.0f, &masked_panel_input);
+        }
+        {
+            LOG_TIMER("gui_render.panel_layout.scene_header.draw");
+            reg.draw_panels_direct(PanelSpace::SceneHeader, content_x, content_top,
+                                   content_w, scene_h, draw_ctx, &masked_panel_input);
+        }
 
-        const auto main_tabs = reg.get_panels_for_space(PanelSpace::MainPanelTab);
+        std::vector<PanelSummary> main_tabs;
+        {
+            LOG_TIMER("gui_render.panel_layout.main_tabs.lookup");
+            main_tabs = reg.get_panels_for_space(PanelSpace::MainPanelTab);
+        }
         syncActiveTab(main_tabs, focus_panel_name);
 
         const float tab_content_y = content_top + scene_h + splitter_h + tab_bar_h;
@@ -163,12 +175,20 @@ namespace lfs::vis::gui {
         const float clip_y_max = tab_content_y + tab_content_h;
         constexpr float kPreloadMaxHeight = 100000.0f;
 
-        const float preloaded_main_h =
-            reg.preload_single_panel_direct(active_tab_id_, content_w, kPreloadMaxHeight, draw_ctx,
-                                            clip_y_min, clip_y_max, &masked_panel_input);
-        const float preloaded_child_h =
-            reg.preload_child_panels_direct(active_tab_id_, content_w, kPreloadMaxHeight, draw_ctx,
-                                            clip_y_min, clip_y_max, &masked_panel_input);
+        float preloaded_main_h = 0.0f;
+        float preloaded_child_h = 0.0f;
+        {
+            LOG_TIMER("gui_render.panel_layout.active_tab.preload");
+            preloaded_main_h =
+                reg.preload_single_panel_direct(active_tab_id_, content_w, kPreloadMaxHeight, draw_ctx,
+                                                clip_y_min, clip_y_max, &masked_panel_input);
+        }
+        {
+            LOG_TIMER("gui_render.panel_layout.active_children.preload");
+            preloaded_child_h =
+                reg.preload_child_panels_direct(active_tab_id_, content_w, kPreloadMaxHeight, draw_ctx,
+                                                clip_y_min, clip_y_max, &masked_panel_input);
+        }
         const float preloaded_total_h = preloaded_main_h + preloaded_child_h;
         const float preloaded_max_scroll =
             std::max(0.0f, preloaded_total_h - tab_content_h);
@@ -186,23 +206,19 @@ namespace lfs::vis::gui {
         }
 
         const float y_cursor = tab_content_y - tab_scroll_offset_;
-        const float main_h = reg.draw_single_panel_direct(active_tab_id_,
-                                                          content_x, y_cursor, content_w, kPreloadMaxHeight, draw_ctx,
-                                                          clip_y_min, clip_y_max, &masked_panel_input);
-        const float child_h = reg.draw_child_panels_direct(active_tab_id_,
-                                                           content_x, y_cursor + main_h, content_w, kPreloadMaxHeight, draw_ctx,
-                                                           clip_y_min, clip_y_max, &masked_panel_input);
-
-        for (size_t attempt = 0; attempt < main_tabs.size(); ++attempt) {
-            const size_t idx = (background_preload_index_ + attempt) % main_tabs.size();
-            const auto& tab = main_tabs[idx];
-            if (tab.id == active_tab_id_)
-                continue;
-
-            reg.preload_single_panel_direct(tab.id, content_w, tab_content_h, draw_ctx,
-                                            clip_y_min, clip_y_max, &masked_panel_input);
-            background_preload_index_ = idx + 1;
-            break;
+        float main_h = 0.0f;
+        float child_h = 0.0f;
+        {
+            LOG_TIMER("gui_render.panel_layout.active_tab.draw");
+            main_h = reg.draw_single_panel_direct(active_tab_id_,
+                                                  content_x, y_cursor, content_w, kPreloadMaxHeight, draw_ctx,
+                                                  clip_y_min, clip_y_max, &masked_panel_input);
+        }
+        {
+            LOG_TIMER("gui_render.panel_layout.active_children.draw");
+            child_h = reg.draw_child_panels_direct(active_tab_id_,
+                                                   content_x, y_cursor + main_h, content_w, kPreloadMaxHeight, draw_ctx,
+                                                   clip_y_min, clip_y_max, &masked_panel_input);
         }
 
         tab_content_total_h_ = main_h + child_h;
@@ -216,6 +232,7 @@ namespace lfs::vis::gui {
                                               const bool ui_hidden,
                                               const PanelInputState& input,
                                               const ScreenState& screen) {
+        LOG_TIMER("gui_render.panel_layout.renderBottomDock");
         auto& reg = PanelRegistry::instance();
         if (!show_main_panel || ui_hidden || screen.work_size.x <= 0 || screen.work_size.y <= 0 ||
             !reg.has_panels(PanelSpace::BottomDock)) {
@@ -298,21 +315,28 @@ namespace lfs::vis::gui {
         panel_h = bottom_dock_height_;
         panel_y = screen.work_pos.y + screen.work_size.y - status_bar_h - panel_h;
 
-        const float preloaded_h =
-            reg.preload_panels_direct(PanelSpace::BottomDock, panel_w, panel_h, draw_ctx,
-                                      panel_y, panel_y + panel_h, &dock_input);
+        float preloaded_h = 0.0f;
+        {
+            LOG_TIMER("gui_render.panel_layout.bottom_dock.preload");
+            preloaded_h =
+                reg.preload_panels_direct(PanelSpace::BottomDock, panel_w, panel_h, draw_ctx,
+                                          panel_y, panel_y + panel_h, &dock_input);
+        }
         bottom_dock_visible_ = preloaded_h > 0.0f;
         bottom_dock_top_y_ = bottom_dock_visible_ ? panel_y : -1.0f;
         if (!bottom_dock_visible_)
             return;
 
-        reg.draw_panels_direct(PanelSpace::BottomDock,
-                               screen.work_pos.x,
-                               panel_y,
-                               panel_w,
-                               panel_h,
-                               draw_ctx,
-                               &dock_input);
+        {
+            LOG_TIMER("gui_render.panel_layout.bottom_dock.draw");
+            reg.draw_panels_direct(PanelSpace::BottomDock,
+                                   screen.work_pos.x,
+                                   panel_y,
+                                   panel_w,
+                                   panel_h,
+                                   draw_ctx,
+                                   &dock_input);
+        }
     }
 
     void PanelLayoutManager::adjustScenePanelRatio(float delta_y, const ScreenState& screen) {

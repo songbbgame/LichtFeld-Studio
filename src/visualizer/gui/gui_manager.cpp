@@ -4556,6 +4556,13 @@ namespace lfs::vis::gui {
         if (vulkan_gui_ && !vulkan_context)
             return;
 
+        std::optional<::lfs::core::ScopedTimer> cpu_ui_before_vulkan_timer;
+        if (vulkan_gui_) {
+            cpu_ui_before_vulkan_timer.emplace("gui_render.cpu_ui_before_vulkan_begin",
+                                               ::lfs::core::LogLevel::Performance,
+                                               std::source_location::current());
+        }
+
         if (pending_cuda_warning_) {
             constexpr int MIN_MAJOR = lfs::core::MIN_CUDA_VERSION / 1000;
             constexpr int MIN_MINOR = (lfs::core::MIN_CUDA_VERSION % 1000) / 10;
@@ -4602,9 +4609,12 @@ namespace lfs::vis::gui {
         }
 
         std::optional<::lfs::core::ScopedTimer> panel_setup_timer;
-        panel_setup_timer.emplace("gui_render.panel_setup");
+        panel_setup_timer.emplace("gui_render.panel_setup",
+                                  ::lfs::core::LogLevel::Performance,
+                                  std::source_location::current());
 
         {
+            LOG_TIMER("gui_render.panel_setup.focus_state");
             auto& focus = guiFocusState();
             focus.reset();
             // Seed from ImGui only; RmlUi panels populate their own claims during
@@ -4618,39 +4628,58 @@ namespace lfs::vis::gui {
         }
 
         // Run queued Python/UI mutations before panel registries take draw snapshots.
-        python::flush_graphics_callbacks();
+        {
+            LOG_TIMER("gui_render.panel_setup.python_flush_callbacks");
+            python::flush_graphics_callbacks();
+        }
 
-        rmlui_manager_.beginFrameCursorTracking();
-        const bool modal_overlay_open = rml_modal_overlay_->isOpen();
-        const bool context_menu_open = global_context_menu_ && global_context_menu_->isOpen();
-        const bool block_underlay_input = modal_overlay_open || context_menu_open;
+        bool modal_overlay_open = false;
+        bool context_menu_open = false;
+        bool block_underlay_input = false;
+        {
+            LOG_TIMER("gui_render.panel_setup.frame_state");
+            rmlui_manager_.beginFrameCursorTracking();
+            modal_overlay_open = rml_modal_overlay_->isOpen();
+            context_menu_open = global_context_menu_ && global_context_menu_->isOpen();
+            block_underlay_input = modal_overlay_open || context_menu_open;
 
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
-            auto* console_state = panels::PythonConsoleState::tryGetInstance();
-            auto* editor = console_state ? console_state->getEditor() : nullptr;
-            const bool editor_owns_escape =
-                editor && (editor->isFocused() || editor->hasActiveCompletion());
-            if (!editor_owns_escape) {
-                widgets::RequestActiveEditCancel();
-                ImGui::ClearActiveID();
-                if (editor != nullptr) {
-                    editor->unfocus();
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
+                auto* console_state = panels::PythonConsoleState::tryGetInstance();
+                auto* editor = console_state ? console_state->getEditor() : nullptr;
+                const bool editor_owns_escape =
+                    editor && (editor->isFocused() || editor->hasActiveCompletion());
+                if (!editor_owns_escape) {
+                    widgets::RequestActiveEditCancel();
+                    ImGui::ClearActiveID();
+                    if (editor != nullptr) {
+                        editor->unfocus();
+                    }
                 }
             }
         }
 
         // Check for async import completion (must happen on main thread)
-        async_tasks_.pollImportCompletion();
-        async_tasks_.pollMesh2SplatCompletion();
-        async_tasks_.pollSplatSimplifyCompletion();
+        {
+            LOG_TIMER("gui_render.panel_setup.async_poll");
+            async_tasks_.pollImportCompletion();
+            async_tasks_.pollMesh2SplatCompletion();
+            async_tasks_.pollSplatSimplifyCompletion();
+        }
 
         // Poll UV package manager for async operations
-        python::PackageManager::instance().poll();
+        {
+            LOG_TIMER("gui_render.panel_setup.package_poll");
+            python::PackageManager::instance().poll();
+        }
 
-        pollDevResourceHotReload();
+        {
+            LOG_TIMER("gui_render.panel_setup.dev_resource_poll");
+            pollDevResourceHotReload();
+        }
 
         // Hot-reload themes (check once per second)
         {
+            LOG_TIMER("gui_render.panel_setup.theme_poll");
             static auto last_check = std::chrono::steady_clock::now();
             const auto now = std::chrono::steady_clock::now();
             if (now - last_check > std::chrono::seconds(1)) {
@@ -4662,6 +4691,7 @@ namespace lfs::vis::gui {
         }
 
         if (menu_bar_ && !ui_hidden_) {
+            LOG_TIMER("gui_render.panel_setup.menu_bar");
             menu_bar_->render();
 
             if (menu_bar_->hasMenuEntries()) {
@@ -4705,18 +4735,24 @@ namespace lfs::vis::gui {
 
             rml_menu_bar_.draw(menu_input.screen_w, menu_input.screen_h);
         } else {
+            LOG_TIMER("gui_render.panel_setup.menu_bar_suspend");
             rml_menu_bar_.suspend();
         }
 
-        PanelInputState frame_input = buildPanelInputFromSDL(sdl_input);
-        updateInputOverrides(frame_input, mouse_in_viewport);
-        if (auto* const wm = viewer_->getWindowManager()) {
-            frame_input.viewport_keyboard_focus = wm->inputRouter().isViewportKeyboardFocused();
+        PanelInputState frame_input;
+        {
+            LOG_TIMER("gui_render.panel_setup.frame_input");
+            frame_input = buildPanelInputFromSDL(sdl_input);
+            updateInputOverrides(frame_input, mouse_in_viewport);
+            if (auto* const wm = viewer_->getWindowManager()) {
+                frame_input.viewport_keyboard_focus = wm->inputRouter().isViewportKeyboardFocused();
+            }
         }
 
         auto& reg = PanelRegistry::instance();
 
         if (!ui_hidden_) {
+            LOG_TIMER("gui_render.panel_setup.shell_frame");
             const auto* mvp = ImGui::GetMainViewport();
             const float status_bar_h = PanelLayoutManager::STATUS_BAR_HEIGHT * current_ui_scale_;
             const float panel_h = mvp->WorkSize.y - status_bar_h;
@@ -4748,16 +4784,23 @@ namespace lfs::vis::gui {
 
         // Update editor context state for this frame
         auto& editor_ctx = viewer_->getEditorContext();
-        editor_ctx.update(viewer_->getSceneManager(), viewer_->getTrainerManager());
+        {
+            LOG_TIMER("gui_render.panel_setup.editor_context_update");
+            editor_ctx.update(viewer_->getSceneManager(), viewer_->getTrainerManager());
+        }
 
         // Create context for this frame
-        UIContext ctx{
-            .viewer = viewer_,
-            .window_states = &window_states_,
-            .editor = &editor_ctx,
-            .sequencer_controller = &sequencer_ui_.controller(),
-            .rml_manager = &rmlui_manager_,
-            .fonts = buildFontSet()};
+        UIContext ctx;
+        {
+            LOG_TIMER("gui_render.panel_setup.context_build");
+            ctx = UIContext{
+                .viewer = viewer_,
+                .window_states = &window_states_,
+                .editor = &editor_ctx,
+                .sequencer_controller = &sequencer_ui_.controller(),
+                .rml_manager = &rmlui_manager_,
+                .fonts = buildFontSet()};
+        }
 
         // Build draw context for panel registry
         lfs::core::Scene* scene = nullptr;
@@ -4776,8 +4819,10 @@ namespace lfs::vis::gui {
         if (auto* cc = lfs::event::command_center())
             draw_ctx.is_training = cc->snapshot().is_running;
 
-        reg.preload_panels(PanelSpace::SceneHeader, draw_ctx);
-        reg.preload_panels(PanelSpace::SidePanel, draw_ctx);
+        if (reg.has_panels(PanelSpace::SidePanel)) {
+            LOG_TIMER("gui_render.panel_setup.legacy_side_panel_preload");
+            reg.preload_panels(PanelSpace::SidePanel, draw_ctx);
+        }
 
         auto* mvp_input = ImGui::GetMainViewport();
         s_frame_input = &sdl_input;
@@ -4793,9 +4838,12 @@ namespace lfs::vis::gui {
             global_context_menu_->processInput(raw_panel_input);
 
         ScreenState screen;
-        screen.work_pos = {mvp_input->WorkPos.x, mvp_input->WorkPos.y};
-        screen.work_size = {mvp_input->WorkSize.x, mvp_input->WorkSize.y};
-        screen.any_item_active = ImGui::IsAnyItemActive() || rmlui_manager_.anyItemActive();
+        {
+            LOG_TIMER("gui_render.panel_setup.panel_input_state");
+            screen.work_pos = {mvp_input->WorkPos.x, mvp_input->WorkPos.y};
+            screen.work_size = {mvp_input->WorkSize.x, mvp_input->WorkSize.y};
+            screen.any_item_active = ImGui::IsAnyItemActive() || rmlui_manager_.anyItemActive();
+        }
 
         constexpr uint8_t kUiLayoutSettleFrames = 3;
         const bool python_console_visible = window_states_["python_console"];
@@ -4815,6 +4863,7 @@ namespace lfs::vis::gui {
             panel_layout_.getActiveTab() != last_ui_layout_active_tab_;
 
         if (ui_layout_changed) {
+            LOG_TIMER("gui_render.panel_setup.layout_state_update");
             ui_layout_settle_frames_ = kUiLayoutSettleFrames;
             last_ui_layout_work_pos_ = screen.work_pos;
             last_ui_layout_work_size_ = screen.work_size;
@@ -4830,6 +4879,7 @@ namespace lfs::vis::gui {
         }
 
         if (show_main_panel_ && !ui_hidden_) {
+            LOG_TIMER("gui_render.panel_setup.rml_right_panel");
             const float sbh = PanelLayoutManager::STATUS_BAR_HEIGHT * current_ui_scale_;
             const float rpw = panel_layout_.getRightPanelWidth();
             const float ph = screen.work_size.y - sbh;
@@ -4911,8 +4961,11 @@ namespace lfs::vis::gui {
 
         applyFrameInputCapture(&rml_right_panel_);
 
-        gizmo_manager_.updateToolState(ctx, ui_hidden_);
-        gizmo_manager_.updateCropFlash();
+        {
+            LOG_TIMER("gui_render.gizmo_update");
+            gizmo_manager_.updateToolState(ctx, ui_hidden_);
+            gizmo_manager_.updateCropFlash();
+        }
 
         float primary_toolbar_x = 0.0f;
         float primary_toolbar_width = viewport_layout_.size.x;
@@ -4979,7 +5032,10 @@ namespace lfs::vis::gui {
             focus.want_capture_mouse = true;
             focus.want_capture_keyboard = true;
         }
-        rml_viewport_overlay_.processInput(panel_input);
+        {
+            LOG_TIMER("gui_render.rml_viewport_overlay.processInput");
+            rml_viewport_overlay_.processInput(panel_input);
+        }
         if (rml_viewport_overlay_.wantsInput() && panel_input.mouse_clicked[0]) {
             if (auto* const rendering = viewer_ ? viewer_->getRenderingManager() : nullptr;
                 rendering && rendering->isIndependentSplitViewActive()) {
@@ -4997,6 +5053,7 @@ namespace lfs::vis::gui {
             }
         }
         if (lfs::python::has_python_hooks("viewport_overlay", "draw")) {
+            LOG_TIMER("gui_render.viewport_overlay.python_hooks");
             lfs::python::invoke_python_hooks("viewport_overlay", "draw", true);
             lfs::python::invoke_python_hooks("viewport_overlay", "draw", false);
         }
@@ -5006,6 +5063,7 @@ namespace lfs::vis::gui {
             overlay_renderer = rendering->getScreenOverlayRenderer();
         }
         if (overlay_renderer) {
+            LOG_TIMER("gui_render.screen_overlay_renderer.beginFrame");
             overlay_renderer->beginFrame();
         }
 
@@ -5015,10 +5073,14 @@ namespace lfs::vis::gui {
         }
 
         if (overlay_renderer) {
+            LOG_TIMER("gui_render.screen_overlay_renderer.endFrame");
             overlay_renderer->endFrame();
         }
 
-        rml_viewport_overlay_.render();
+        {
+            LOG_TIMER("gui_render.rml_viewport_overlay.render");
+            rml_viewport_overlay_.render();
+        }
 
         applyFrameInputCapture();
 
@@ -5102,6 +5164,7 @@ namespace lfs::vis::gui {
             VulkanContext::Frame frame{};
             bool begin_ok = false;
             {
+                cpu_ui_before_vulkan_timer.reset();
                 LOG_TIMER("gui_render.vulkan_beginFrame");
                 begin_ok = vulkan_context && vulkan_context->beginFrame(clear_value, frame);
             }

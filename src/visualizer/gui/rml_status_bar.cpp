@@ -253,6 +253,15 @@ namespace lfs::vis::gui {
     }
 
     void RmlStatusBar::shutdown() {
+        if (pending_gpu_mem_.valid()) {
+            pending_gpu_mem_.wait();
+            try {
+                cached_gpu_mem_ = pending_gpu_mem_.get();
+            } catch (const std::exception& e) {
+                LOG_WARN("RmlStatusBar: GPU memory query failed during shutdown: {}", e.what());
+            }
+        }
+
         model_handle_ = {};
         if (rml_context_ && rml_manager_)
             rml_manager_->destroyContext("status_bar");
@@ -315,6 +324,30 @@ namespace lfs::vis::gui {
         rml_theme::applyTheme(document_, base_rcss_, rml_theme::loadBaseRCSS("rmlui/statusbar.theme.rcss"));
         model_dirty_ = true;
         return true;
+    }
+
+    void RmlStatusBar::pollGpuMemoryQuery(const std::chrono::steady_clock::time_point now) {
+        if (pending_gpu_mem_.valid() &&
+            pending_gpu_mem_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            try {
+                cached_gpu_mem_ = pending_gpu_mem_.get();
+            } catch (const std::exception& e) {
+                LOG_WARN("RmlStatusBar: GPU memory query failed: {}", e.what());
+            }
+        }
+
+        if (pending_gpu_mem_.valid())
+            return;
+
+        if (next_gpu_refresh_at_ != std::chrono::steady_clock::time_point{} &&
+            now < next_gpu_refresh_at_) {
+            return;
+        }
+
+        next_gpu_refresh_at_ = now + kGpuRefreshInterval;
+        pending_gpu_mem_ = std::async(std::launch::async, [] {
+            return queryGpuMemory();
+        });
     }
 
     void RmlStatusBar::attachGitCommitListener() {
@@ -562,11 +595,7 @@ namespace lfs::vis::gui {
         }
 
         // Right section: GPU memory
-        if (next_gpu_refresh_at_ == std::chrono::steady_clock::time_point{} ||
-            now >= next_gpu_refresh_at_) {
-            cached_gpu_mem_ = queryGpuMemory();
-            next_gpu_refresh_at_ = now + kGpuRefreshInterval;
-        }
+        pollGpuMemoryQuery(now);
         const auto mem = cached_gpu_mem_;
         float app_gb = mem.process_used / 1e9f;
         float used_gb = mem.total_used / 1e9f;

@@ -11,6 +11,7 @@
 #include "theme/theme.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <optional>
 #include <imgui.h>
 
@@ -512,6 +513,12 @@ namespace lfs::vis::gui {
             if (!should_draw[snap_idx])
                 continue;
 
+            constexpr double kViewportOverlayPanelPerfThresholdMs = 0.05;
+            const bool time_viewport_panel = space == PanelSpace::ViewportOverlay;
+            const auto panel_start = time_viewport_panel
+                                         ? std::chrono::steady_clock::now()
+                                         : std::chrono::steady_clock::time_point{};
+
             try {
                 ImGui::PushID(snap.id.c_str());
                 snap.panel->setPanelSpace(space);
@@ -724,6 +731,16 @@ namespace lfs::vis::gui {
             }
 
             track_draw_result(snap, draw_succeeded);
+            if (time_viewport_panel) {
+                const auto elapsed =
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - panel_start)
+                        .count();
+                if (elapsed >= kViewportOverlayPanelPerfThresholdMs) {
+                    LOG_PERF("gui_render.viewport_overlay.panel.{} took {:.2f}ms",
+                             snap.id, elapsed);
+                }
+            }
         }
     }
 
