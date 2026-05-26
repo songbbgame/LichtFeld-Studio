@@ -393,6 +393,7 @@ add_subdirectory(src/io)         # I/O module (lfs::io namespace)
 add_subdirectory(src/rendering)  # Rendering module (lfs::rendering namespace)
 add_subdirectory(src/sequencer)  # Sequencer module (lfs::sequencer namespace)
 add_subdirectory(src/visualizer) # Visualizer module (lfs::vis namespace)
+add_subdirectory(src/tcp)        # TCP event server (ZMQ responder + publisher)
 add_subdirectory(src/geometry)   # Geometry utilities
 add_subdirectory(src/mcp)        # MCP server (AI agent integration)
 add_subdirectory(src/python)
@@ -431,6 +432,7 @@ target_include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/src              # For training/, visualizer/, etc.
         ${CMAKE_CURRENT_SOURCE_DIR}/src/visualizer   # For internal visualizer headers used by GUI MCP
         ${CMAKE_CURRENT_SOURCE_DIR}/src/rendering/include  # For rendering headers (MCP GUI tools)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcp          # For tcp event server
         ${CMAKE_CURRENT_SOURCE_DIR}/external         # For external headers
 
         ${CUDAToolkit_INCLUDE_DIRS}
@@ -438,11 +440,12 @@ target_include_directories(${PROJECT_NAME}
 
 if(CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED)
     set(LFS_APP_INTERNAL_LINK_LIBS
-        "$<LINK_GROUP:RESCAN,lfs_visualizer,lfs_mcp,lfs_sequencer,lfs_rendering_tensor,lfs_training,lfs_geometry,lfs_core,lfs_io,lfs_video,fastlfs_backend,lfs_python_utils>"
+        "$<LINK_GROUP:RESCAN,lfs_visualizer,lfs_mcp,lfs_sequencer,lfs_rendering_tensor,lfs_training,lfs_geometry,lfs_core,lfs_io,lfs_video,fastlfs_backend,lfs_python_utils,lfs_tcp>"
     )
 else()
     set(LFS_APP_INTERNAL_LINK_LIBS
         lfs_visualizer
+        lfs_tcp
         lfs_mcp
         lfs_sequencer
         lfs_rendering_tensor
@@ -935,6 +938,7 @@ configure_build_type(lfs_rendering)
 configure_build_type(lfs_visualizer)
 configure_build_type(lfs_io)
 configure_build_type(lfs_geometry)
+configure_build_type(lfs_tcp)
 configure_build_type(${PROJECT_NAME})
 
 if(LFS_FAST_COMPILE AND MSVC)

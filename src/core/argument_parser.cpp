@@ -311,6 +311,9 @@ namespace {
             ::args::Flag quiet(logging_group, "quiet", "Suppress non-error output (equivalent to --log-level error)", {'q', "quiet"});
             ::args::ValueFlag<std::string> log_file(logging_group, "file", "Optional log file path", {"log-file"});
             ::args::ValueFlag<std::string> log_filter(logging_group, "pattern", "Filter log messages (glob: *foo*, regex: \\\\d+)", {"log-filter"});
+            ::args::Flag tcp_connection(parser, "tcp_connection", "Use TCP connection for signals and events", {"tcp-connection"});
+            ::args::ValueFlag<int> tcp_server_connection_port(parser, "tcp_server_connection_port", "TCP connection port when tcp connection is in use for server requests, -1 for auto", {"tcp-server-port"});
+            ::args::ValueFlag<int> tcp_broadcast_connection_port(parser, "tcp_broadcast_connection_port", "TCP connection port when tcp connection is in use for broadcasting, -1 for auto", {"tcp-broadcast-port"});
 
             // =============================================================================
             // EXTENSIONS
@@ -488,6 +491,12 @@ namespace {
                     parser.Help()));
             }
 
+            if (tcp_connection && !headless) {
+                return std::unexpected(std::format(
+                    "ERROR: TCP connection mode requires --headless\n\n{}",
+                    parser.Help()));
+            }
+
             // Training/resume mode requires both data-path and output-path
             // Exception: resume mode can work without explicit paths (extracted from checkpoint)
             if (has_data_path && has_output_path) {
@@ -640,6 +649,9 @@ namespace {
                                         max_width_val = max_width ? std::optional<int>(::args::get(max_width)) : std::optional<int>(3840),
                                         no_cpu_cache_flag = static_cast<bool>(no_cpu_cache),
                                         no_fs_cache_flag = static_cast<bool>(no_fs_cache),
+                                        tcp_server_connection_port_val = tcp_server_connection_port ? std::optional<int>(::args::get(tcp_server_connection_port)) : std::optional<int>(),
+                                        tcp_broadcast_connection_port_val = tcp_broadcast_connection_port ? std::optional<int>(::args::get(tcp_broadcast_connection_port)) : std::optional<int>(),
+                                        tcp_connection_flag = bool(tcp_connection),
                                         max_cap_val = cli_option_present({"--max-cap"}) ? std::optional<int>(::args::get(max_cap)) : std::optional<int>(),
                                         config_file_val = cli_option_present({"--config"}) ? std::optional<std::string>(::args::get(config_file)) : std::optional<std::string>(),
                                         images_folder_val = cli_option_present({"--images"}) ? std::optional<std::string>(::args::get(images_folder)) : std::optional<std::string>(),
@@ -694,6 +706,7 @@ namespace {
                                         use_edge_map_flag = bool(use_edge_map),
                                         output_name_val = cli_option_present({"--output-name"}) ? std::optional<std::string>(::args::get(output_name)) : std::optional<std::string>()]() {
                 auto& opt = params.optimization;
+                auto& svs = params.server;
                 auto& ds = params.dataset;
 
                 // Simple lambdas to apply if flag/value exists
@@ -716,6 +729,9 @@ namespace {
                 if (no_fs_cache_flag)
                     ds.loading_params.use_fs_cache = false;
                 setVal(max_cap_val, opt.max_cap);
+                setVal(tcp_server_connection_port_val, svs.tcp_server_connection_port);
+                setVal(tcp_broadcast_connection_port_val, svs.tcp_broadcast_connection_port);
+                setFlag(tcp_connection_flag, svs.tcp_connection);
                 setVal(images_folder_val, ds.images);
                 setVal(test_every_val, ds.test_every);
                 setVal(steps_scaler_val, opt.steps_scaler);
