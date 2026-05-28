@@ -598,6 +598,7 @@ namespace lfs::vis::gui {
                                                      depth_stencil_image_view,
                                                      frame_slot);
         vulkan_frame_active_ = true;
+        vulkan_frame_extent_ = extent;
         return true;
     }
 
@@ -615,7 +616,18 @@ namespace lfs::vis::gui {
             const std::string timer_name = std::string("gui_render.rmlui_record.") +
                                            (foreground ? "foreground.context." : "background.context.") +
                                            command.context_name;
-            if (command.cache) {
+            // SaveLayerAsTexture clamps the captured region to the framebuffer, so a
+            // cache larger than the current frame would be stretched back to its
+            // requested size on blit (magnified). Render such oversized panels
+            // directly instead, exactly as the uncached path does.
+            const bool cache_exceeds_frame =
+                command.cache &&
+                (command.cache_width > static_cast<int>(vulkan_frame_extent_.width) ||
+                 command.cache_height > static_cast<int>(vulkan_frame_extent_.height));
+            if (cache_exceeds_frame && command.cache->texture != 0)
+                releaseCachedVulkanContext(*command.cache);
+
+            if (command.cache && !cache_exceeds_frame) {
                 const bool refresh_cache =
                     command.refresh_cache ||
                     command.cache->texture == 0 ||

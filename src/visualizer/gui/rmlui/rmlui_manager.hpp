@@ -178,6 +178,7 @@ namespace lfs::vis::gui {
         bool debugger_enabled_ = false;
         bool debugger_initialized_ = false;
         bool vulkan_frame_active_ = false;
+        VkExtent2D vulkan_frame_extent_{};
         bool initialized_ = false;
         std::uint64_t tracked_context_order_ = 0;
     };
