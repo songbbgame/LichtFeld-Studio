@@ -36,8 +36,8 @@
 #include "python/python_runtime.hpp"
 #include "python/ui_hooks.hpp"
 #include "rendering/render_constants.hpp"
-#include "visualizer/core/editor_context.hpp"
 #include "visualizer/app_store.hpp"
+#include "visualizer/core/editor_context.hpp"
 #include "visualizer/gui/panel_registry.hpp"
 #include "visualizer/operation/undo_history.hpp"
 #include "visualizer/operator/operator_context.hpp"
@@ -3236,43 +3236,43 @@ namespace lfs::python {
     void register_ui_context_menu(nb::module_& m) {
         const auto make_python_context_menu_callback =
             [](nb::object callback) -> lfs::vis::gui::GlobalContextMenu::ActionCallback {
-                if (callback.is_none())
-                    return {};
-                if (!PyCallable_Check(callback.ptr()))
-                    throw nb::type_error("show_context_menu on_action must be callable or None");
+            if (callback.is_none())
+                return {};
+            if (!PyCallable_Check(callback.ptr()))
+                throw nb::type_error("show_context_menu on_action must be callable or None");
 
-                PyObject* const callable = callback.ptr();
-                Py_INCREF(callable);
-                const auto callable_ref = std::shared_ptr<PyObject>(callable, [](PyObject* obj) {
-                    if (!obj || !lfs::python::can_acquire_gil())
-                        return;
-                    const lfs::python::GilAcquire gil;
-                    Py_DECREF(obj);
-                });
+            PyObject* const callable = callback.ptr();
+            Py_INCREF(callable);
+            const auto callable_ref = std::shared_ptr<PyObject>(callable, [](PyObject* obj) {
+                if (!obj || !lfs::python::can_acquire_gil())
+                    return;
+                const lfs::python::GilAcquire gil;
+                Py_DECREF(obj);
+            });
 
-                return [callable_ref](const std::string_view action) {
-                    if (!lfs::python::can_acquire_gil()) {
-                        LOG_ERROR("Unable to run Python context menu callback: Python GIL is unavailable");
-                        return;
-                    }
+            return [callable_ref](const std::string_view action) {
+                if (!lfs::python::can_acquire_gil()) {
+                    LOG_ERROR("Unable to run Python context menu callback: Python GIL is unavailable");
+                    return;
+                }
 
-                    const lfs::python::GilAcquire gil;
-                    PyObject* const py_action = PyUnicode_FromStringAndSize(action.data(), action.size());
-                    if (!py_action) {
-                        LOG_ERROR("Python context menu callback argument creation failed: {}",
-                                  lfs::python::extract_python_error());
-                        return;
-                    }
+                const lfs::python::GilAcquire gil;
+                PyObject* const py_action = PyUnicode_FromStringAndSize(action.data(), action.size());
+                if (!py_action) {
+                    LOG_ERROR("Python context menu callback argument creation failed: {}",
+                              lfs::python::extract_python_error());
+                    return;
+                }
 
-                    PyObject* const result = PyObject_CallFunctionObjArgs(callable_ref.get(), py_action, nullptr);
-                    Py_DECREF(py_action);
-                    if (result) {
-                        Py_DECREF(result);
-                    } else {
-                        LOG_ERROR("Python context menu callback failed: {}", lfs::python::extract_python_error());
-                    }
-                };
+                PyObject* const result = PyObject_CallFunctionObjArgs(callable_ref.get(), py_action, nullptr);
+                Py_DECREF(py_action);
+                if (result) {
+                    Py_DECREF(result);
+                } else {
+                    LOG_ERROR("Python context menu callback failed: {}", lfs::python::extract_python_error());
+                }
             };
+        };
 
         m.def(
             "show_context_menu",
@@ -3685,8 +3685,7 @@ namespace lfs::python {
                                  {0, 0}, {u1, v1}, t, {0, 0, 0, 0});
                 },
                 nb::arg("texture"), nb::arg("size"), nb::arg("tint") = nb::none(), "Draw a DynamicTexture with automatic UV scaling")
-            .def(
-                "image_tensor", [](PyUILayout& /*self*/, const std::string& label, PyTensor& tensor, std::tuple<float, float> size, nb::object tint) {
+            .def("image_tensor", [](PyUILayout& /*self*/, const std::string& label, PyTensor& tensor, std::tuple<float, float> size, nb::object tint) {
                     PyDynamicTexture* tex_ptr = nullptr;
                     {
                         std::lock_guard lock(g_dynamic_textures_mutex);

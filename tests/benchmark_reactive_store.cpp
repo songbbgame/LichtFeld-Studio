@@ -5,11 +5,11 @@
 #include "core/reactive/store.hpp"
 
 #include <chrono>
+#include <gtest/gtest.h>
 #include <iostream>
 #include <memory>
 #include <thread>
 #include <vector>
-#include <gtest/gtest.h>
 
 TEST(ReactiveStoreBenchmark, MultiProducerDrainCost) {
     constexpr int kFields = 100;

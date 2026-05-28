@@ -5,11 +5,11 @@
 #include "core/reactive/store.hpp"
 
 #include <atomic>
+#include <gtest/gtest.h>
 #include <memory>
 #include <stdexcept>
 #include <thread>
 #include <vector>
-#include <gtest/gtest.h>
 
 using lfs::core::reactive::BatchUpdate;
 using lfs::core::reactive::Observable;

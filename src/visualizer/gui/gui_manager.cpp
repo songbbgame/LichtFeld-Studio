@@ -5184,7 +5184,7 @@ namespace lfs::vis::gui {
                             glm::vec2{content_w, tab_content_h});
 
             const bool float_blocks_rp = has_floating_panels &&
-                reg.isPositionOverFloatingPanel(panel_input.mouse_x, panel_input.mouse_y);
+                                         reg.isPositionOverFloatingPanel(panel_input.mouse_x, panel_input.mouse_y);
             if (float_blocks_rp) {
                 PanelInputState masked_input = panel_input;
                 masked_input.mouse_x = -1.0e9f;
@@ -5299,7 +5299,7 @@ namespace lfs::vis::gui {
         const float bottom_dock_h = std::max(panel_layout_.getBottomDockHeight(), 0.0f);
         const float bottom_dock_w = show_main_panel_ && !ui_hidden_
                                         ? std::max(0.0f, screen.work_size.x -
-                                                           panel_layout_.getRightPanelWidth())
+                                                             panel_layout_.getRightPanelWidth())
                                         : screen.work_size.x;
         const float bottom_dock_y =
             screen.work_pos.y + screen.work_size.y - status_bar_h - bottom_dock_h;

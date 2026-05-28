@@ -4,8 +4,8 @@
 
 #include "core/editor_context.hpp"
 #include "scene/scene_manager.hpp"
-#include "visualizer/app_store.hpp"
 #include "training/training_manager.hpp"
+#include "visualizer/app_store.hpp"
 #include "visualizer/gui_capabilities.hpp"
 
 #include <string_view>

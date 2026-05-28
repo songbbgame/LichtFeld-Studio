@@ -8,21 +8,21 @@
 
 namespace {
 
-class LogHandlerGuard {
-public:
-    explicit LogHandlerGuard(lfs::core::LogHandler handler)
-        : token_(lfs::core::Logger::get().add_log_handler(std::move(handler))) {}
+    class LogHandlerGuard {
+    public:
+        explicit LogHandlerGuard(lfs::core::LogHandler handler)
+            : token_(lfs::core::Logger::get().add_log_handler(std::move(handler))) {}
 
-    ~LogHandlerGuard() {
-        lfs::core::Logger::get().remove_log_handler(token_);
-    }
+        ~LogHandlerGuard() {
+            lfs::core::Logger::get().remove_log_handler(token_);
+        }
 
-    LogHandlerGuard(const LogHandlerGuard&) = delete;
-    LogHandlerGuard& operator=(const LogHandlerGuard&) = delete;
+        LogHandlerGuard(const LogHandlerGuard&) = delete;
+        LogHandlerGuard& operator=(const LogHandlerGuard&) = delete;
 
-private:
-    lfs::core::LogHandlerToken token_;
-};
+    private:
+        lfs::core::LogHandlerToken token_;
+    };
 
 } // namespace
 

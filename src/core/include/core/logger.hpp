@@ -230,7 +230,7 @@ namespace lfs::core {
 #define _LOG_TIMER_CONCAT_IMPL(x, y)  x##y
 #define _LOG_TIMER_MACRO_CONCAT(x, y) _LOG_TIMER_CONCAT_IMPL(x, y)
 
-#define LOG_TIMER(name)       ::lfs::core::ScopedTimer _LOG_TIMER_MACRO_CONCAT(_timer_, __COUNTER__)(name)
+#define LOG_TIMER(name) ::lfs::core::ScopedTimer _LOG_TIMER_MACRO_CONCAT(_timer_, __COUNTER__)(name)
 #define LOG_TIMER_THRESHOLD(name, min_log_ms) \
     ::lfs::core::ScopedTimer _LOG_TIMER_MACRO_CONCAT(_timer_, __COUNTER__)(name, min_log_ms)
 #define LOG_TIMER_TRACE(name) ::lfs::core::ScopedTimer _LOG_TIMER_MACRO_CONCAT(_timer_, __COUNTER__)(name, ::lfs::core::LogLevel::Trace)

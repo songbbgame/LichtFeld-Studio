@@ -106,8 +106,8 @@ namespace lfs::python {
 
     void PyUIHookRegistry::add_hook(const std::string& panel,
                                     const std::string& section,
-        nb::object callback,
-        PyHookPosition position) {
+                                    nb::object callback,
+                                    PyHookPosition position) {
         std::lock_guard lock(mutex_);
         const std::string key = panel + ":" + section;
         const std::string name = callback_name(callback);

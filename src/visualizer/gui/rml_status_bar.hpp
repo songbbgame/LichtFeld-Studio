@@ -4,10 +4,10 @@
 
 #pragma once
 
+#include "core/reactive/store.hpp"
 #include "gui/gpu_memory_query.hpp"
 #include "gui/panel_registry.hpp"
 #include "gui/rmlui/rmlui_manager.hpp"
-#include "core/reactive/store.hpp"
 #include <RmlUi/Core/DataModelHandle.h>
 #include <chrono>
 #include <cstddef>

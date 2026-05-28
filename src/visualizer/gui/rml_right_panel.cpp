@@ -406,7 +406,7 @@ namespace lfs::vis::gui {
             !layout_changed) {
             wants_keyboard_ = rml_input::hasFocusedKeyboardTarget(focused_before);
             wants_input_ = wants_keyboard_ || last_over_interactive_ ||
-                            previous_cursor_request != CursorRequest::None;
+                           previous_cursor_request != CursorRequest::None;
             cursor_request_ = previous_cursor_request;
             return;
         }
