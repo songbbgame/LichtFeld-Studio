@@ -8,6 +8,7 @@
 #include "core/export.hpp"
 #include "core/tensor.hpp"
 #include "dirty_flags.hpp"
+#include "io/loader.hpp"
 #include "framerate_controller.hpp"
 #include "internal/viewport.hpp"
 #include "passes/vulkan_depth_blit_pass.hpp"
@@ -145,6 +146,8 @@ namespace lfs::vis {
                                                                   float focal_length_mm,
                                                                   int width, int height);
         void releasePreviewImageResources();
+
+        [[nodiscard]] lfs::io::SplatTensorAllocator makeSplatTensorAllocator() const;
 
         void markDirty();
         void markDirty(DirtyMask flags);
