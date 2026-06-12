@@ -1132,7 +1132,8 @@ struct Uniforms {
     // HiGS raster/compose wave window start (batch index); occupies what was
     // implicit alignment padding before dist_coeffs, so the layout is unchanged.
     uint wave_base;
-    uint higs_pad0;
+    // 0 = median depth; > 0 = alpha-weighted (expected) depth, far bound = value.
+    float expected_far;
     float4 dist_coeffs;
     float4x4 world_view_transform;
 }
