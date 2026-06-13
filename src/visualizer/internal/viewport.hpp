@@ -153,15 +153,7 @@ class Viewport {
             roll_target = wrapAngle(roll_target + ang_rad);
         }
 
-        void translate(const glm::vec2& pos) {
-            const glm::vec2 delta = pos - prePos;
-            const float dist_to_pivot = glm::length(pivot - t);
-            const float adaptive_speed = translateSpeed * dist_to_pivot;
-            const glm::vec3 movement = -(delta.x * adaptive_speed) * R[0] + (delta.y * adaptive_speed) * R[1];
-            t += movement;
-            pivot += movement;
-            prePos = pos;
-        }
+        void translate(const glm::vec2& pos) { applyPanDrag(pos); }
 
         void zoom(float delta, bool carry_pivot = false) {
             const glm::vec3 forward = lfs::rendering::cameraForward(R);
@@ -312,6 +304,47 @@ class Viewport {
             orbit_vel_pitch = 0.0f;
         }
 
+        // Panning carries a world-space velocity so a released drag glides to
+        // rest instead of stopping dead, mirroring the orbit ease-out.
+        void startPan(const glm::vec2& pos, float time) {
+            prePos = pos;
+            pan_last_time = time;
+            clearPanMomentum();
+        }
+
+        // Applies a world-space pan from the drag delta and remembers the recent
+        // motion so the view can coast to rest on release.
+        void panDrag(const glm::vec2& pos, float time) {
+            const glm::vec3 movement = applyPanDrag(pos);
+            const float sample_time = std::max(time - pan_last_time, kPanMinSampleTime);
+            pan_last_time = time;
+            pan_velocity = glm::mix(pan_velocity, movement / sample_time, kPanVelBlend);
+        }
+
+        // Fade stored motion while the button is still held, so pausing before
+        // release lets the coast die down rather than flinging on a stale drag.
+        void decayPanMomentum(float deltaTime) {
+            pan_velocity *= std::exp(-deltaTime * kPanCoastRate);
+            snapPanMomentumToRest();
+        }
+
+        // Coast after release by integrating remembered velocity while decaying
+        // it to zero.
+        void updatePanCoast(float deltaTime) {
+            if (!hasPanMomentum())
+                return;
+            const float decay = std::exp(-deltaTime * kPanCoastRate);
+            const float coast_time = (1.0f - decay) / kPanCoastRate;
+            const glm::vec3 movement = pan_velocity * coast_time;
+            t += movement;
+            pivot += movement;
+            pan_velocity *= decay;
+            snapPanMomentumToRest();
+        }
+
+        [[nodiscard]] bool hasPanMomentum() const { return glm::length2(pan_velocity) > 0.0f; }
+        void clearPanMomentum() { pan_velocity = glm::vec3(0.0f); }
+
         // Short eased translation toward a target position; orientation and
         // pivot are not touched, so orbiting mid-glide stays consistent.
         void startGlide(const glm::vec3& target) {
@@ -343,6 +376,7 @@ class Viewport {
         void clearTransientMotion() {
             clearWasdMomentum();
             clearOrbitMomentum();
+            clearPanMomentum();
             glide_time_left = 0.0f;
         }
 
@@ -440,6 +474,32 @@ class Viewport {
             prePos = pos;
             applyOrbitRotation(rotation.x, rotation.y, trackball);
             return rotation;
+        }
+
+        glm::vec3 pan_velocity{0.0f};
+        float pan_last_time = 0.0f;
+        static constexpr float kPanMinSampleTime = 1.0f / 240.0f;
+        static constexpr float kPanVelBlend = 0.35f;
+        static constexpr float kPanCoastRate = 18.0f;
+        static constexpr float kPanStopVelocity = 1e-4f;
+
+        void snapPanMomentumToRest() {
+            if (glm::length2(pan_velocity) < kPanStopVelocity * kPanStopVelocity)
+                pan_velocity = glm::vec3(0.0f);
+        }
+
+        // Maps a drag delta to a world-space translation, applies it to camera
+        // and pivot, advances prePos, and returns the applied movement so
+        // callers can track momentum.
+        glm::vec3 applyPanDrag(const glm::vec2& pos) {
+            const glm::vec2 delta = pos - prePos;
+            const float dist_to_pivot = glm::length(pivot - t);
+            const float adaptive_speed = translateSpeed * dist_to_pivot;
+            const glm::vec3 movement = -(delta.x * adaptive_speed) * R[0] + (delta.y * adaptive_speed) * R[1];
+            t += movement;
+            pivot += movement;
+            prePos = pos;
+            return movement;
         }
 
         [[nodiscard]] static float wrapAngle(float angle) {

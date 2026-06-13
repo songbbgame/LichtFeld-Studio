@@ -1281,9 +1281,12 @@ namespace lfs::vis {
             auto* const target_viewport = drag_viewport_ ? drag_viewport_ : &viewport_;
 
             switch (drag_mode_) {
-            case DragMode::Pan:
-                target_viewport->camera.translate(pos);
+            case DragMode::Pan: {
+                const float current_time = static_cast<float>(SDL_GetTicks() / 1000.0f);
+                target_viewport->camera.panDrag(pos, current_time);
+                pan_coast_viewport_ = target_viewport;
                 break;
+            }
             case DragMode::Rotate:
                 target_viewport->camera.rotateFpv(pos);
                 break;
@@ -1919,6 +1922,29 @@ namespace lfs::vis {
             }
         }
 
+        // Pan ease-out: mirror the orbit coast for click-drag panning. While the
+        // button is held a paused drag fades the stored motion; once released the
+        // remembered translation coasts to a smooth stop.
+        if (pan_coast_viewport_) {
+            auto& pan_camera = pan_coast_viewport_->camera;
+            if (drag_mode_ == DragMode::Pan) {
+                pan_camera.decayPanMomentum(delta_time);
+            } else if (pan_camera.hasPanMomentum()) {
+                pan_camera.updatePanCoast(delta_time);
+                onCameraMovementStart();
+                publishCameraMove(pan_coast_viewport_);
+                if (!pan_camera.hasPanMomentum()) {
+                    ui::CameraMove{
+                        .rotation = pan_coast_viewport_->getRotationMatrix(),
+                        .translation = pan_coast_viewport_->getTranslation()}
+                        .emit();
+                    pan_coast_viewport_ = nullptr;
+                }
+            } else {
+                pan_coast_viewport_ = nullptr;
+            }
+        }
+
         // Drive the set-pivot recenter glide
         if (auto& glide_viewport = activeKeyboardViewport(); glide_viewport.camera.isGliding()) {
             const bool movement_keys_active = keys_movement_[0] || keys_movement_[1] || keys_movement_[2] ||
@@ -2449,8 +2475,9 @@ namespace lfs::vis {
     void InputController::beginPanDrag(const PanelInteractionState& interaction, const int button,
                                        const double x, const double y) {
         LOG_PERF("InputController::beginPanDrag button={} pos=({},{})", button, x, y);
+        const float current_time = static_cast<float>(SDL_GetTicks() / 1000.0f);
         interaction.viewport->camera.finishGlide();
-        interaction.viewport->camera.initScreenPos(glm::vec2(x, y));
+        interaction.viewport->camera.startPan(glm::vec2(x, y), current_time);
         drag_viewport_ = interaction.viewport;
         drag_split_panel_ = interaction.panel;
         focusSplitPanel(interaction.panel);

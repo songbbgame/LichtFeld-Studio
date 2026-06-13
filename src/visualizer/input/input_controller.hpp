@@ -107,10 +107,12 @@ namespace lfs::vis {
             auto& keyboard_camera = activeKeyboardViewport().camera;
             const bool orbit_coasting =
                 orbit_coast_viewport_ && orbit_coast_viewport_->camera.hasOrbitMomentum();
+            const bool pan_coasting =
+                pan_coast_viewport_ && pan_coast_viewport_->camera.hasPanMomentum();
             const bool wasd_coasting =
                 (wasd_momentum_viewport_ && wasd_momentum_viewport_->camera.hasWasdMomentum()) ||
                 keyboard_camera.hasWasdMomentum();
-            return movement_active || camera_drag || orbit_coasting ||
+            return movement_active || camera_drag || orbit_coasting || pan_coasting ||
                    keyboard_camera.isGliding() || wasd_coasting;
         }
         [[nodiscard]] bool hasViewportKeyboardFocus() const;
@@ -221,6 +223,7 @@ namespace lfs::vis {
         double splitter_start_x_ = 0.0;
         Viewport* drag_viewport_ = nullptr;
         Viewport* orbit_coast_viewport_ = nullptr;
+        Viewport* pan_coast_viewport_ = nullptr;
         Viewport* wasd_momentum_viewport_ = nullptr;
         SplitViewPanelId drag_split_panel_ = SplitViewPanelId::Left;
         SplitViewPanelId node_rect_panel_ = SplitViewPanelId::Left;
