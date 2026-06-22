@@ -94,6 +94,9 @@ namespace lfs::vis {
         bool pending_titlebar_double_click_ = false;
         bool titlebar_drag_active_ = false;
         glm::ivec2 titlebar_drag_start_global_{0, 0};
+        bool is_work_area_maximized_ = false;
+        glm::ivec2 maximized_restore_pos_{0, 0};
+        glm::ivec2 maximized_restore_size_{1280, 720};
         bool should_close_ = false;
 
         static void* callback_handler_;
@@ -106,6 +109,10 @@ namespace lfs::vis {
         void beginTitlebarDrag();
         void finishTitlebarDrag();
         void finishTitlebarDragIfReleased();
+        [[nodiscard]] bool isSdlMaximized() const;
+        void saveMaximizedRestoreGeometry();
+        void maximizeToWorkArea(const char* reason, bool save_restore_geometry);
+        void restoreMaximized(const char* reason);
         [[nodiscard]] bool titlebarDragMovedEnough() const;
         [[nodiscard]] bool isTitlebarDragAtDisplayTop() const;
         void flushPendingTitlebarDoubleClick();
