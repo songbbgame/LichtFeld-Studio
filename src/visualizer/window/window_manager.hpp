@@ -96,7 +96,10 @@ namespace lfs::vis {
         bool native_titlebar_move_available_ = false;
         bool pending_titlebar_double_click_ = false;
         bool titlebar_drag_active_ = false;
+        bool titlebar_drag_started_maximized_ = false;
         glm::ivec2 titlebar_drag_start_global_{0, 0};
+        glm::ivec2 titlebar_drag_start_local_{0, 0};
+        glm::ivec2 titlebar_drag_window_offset_{0, 0};
         bool is_borderless_maximized_ = false;
         glm::ivec2 borderless_restore_pos_{0, 0};
         glm::ivec2 borderless_restore_size_{1280, 720};
@@ -109,7 +112,8 @@ namespace lfs::vis {
         std::vector<std::string> pending_drop_files_;
 
         void beginTitlebarNativeMove();
-        void beginTitlebarDrag();
+        void beginTitlebarDrag(int local_x, int local_y);
+        void updateTitlebarDrag();
         void finishTitlebarDrag();
         void finishTitlebarDragIfReleased();
         [[nodiscard]] bool isSdlMaximized() const;
@@ -117,6 +121,8 @@ namespace lfs::vis {
         void normalizeNativeMaximize(const char* reason);
         void maximizeBorderless(const char* reason, bool save_restore_geometry);
         void restoreMaximized(const char* reason);
+        void restoreMaximizedForTitlebarDrag();
+        void updateManualTitlebarMove();
         [[nodiscard]] bool titlebarDragMovedEnough() const;
         [[nodiscard]] bool isTitlebarDragAtDisplayTop() const;
         void flushPendingTitlebarDoubleClick();

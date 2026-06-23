@@ -121,6 +121,16 @@ namespace lfs::vis {
             return haystack && needle && std::strstr(haystack, needle) != nullptr;
         }
 
+        glm::ivec2 globalMousePosition() {
+            float global_x = 0.0f;
+            float global_y = 0.0f;
+            SDL_GetGlobalMouseState(&global_x, &global_y);
+            return {
+                static_cast<int>(std::lround(global_x)),
+                static_cast<int>(std::lround(global_y)),
+            };
+        }
+
 #if defined(__linux__)
         bool getX11WindowHandle(SDL_Window* const window, Display*& display, ::Window& xwindow) {
             if (!window)
@@ -149,9 +159,7 @@ namespace lfs::vis {
             if (!getX11WindowHandle(window, display, xwindow))
                 return false;
 
-            float global_x = 0.0f;
-            float global_y = 0.0f;
-            SDL_GetGlobalMouseState(&global_x, &global_y);
+            const glm::ivec2 global_mouse = globalMousePosition();
 
             const Atom moveresize = XInternAtom(display, "_NET_WM_MOVERESIZE", False);
             if (moveresize == None)
@@ -163,8 +171,8 @@ namespace lfs::vis {
             event.xclient.window = xwindow;
             event.xclient.message_type = moveresize;
             event.xclient.format = 32;
-            event.xclient.data.l[0] = static_cast<long>(std::lround(global_x));
-            event.xclient.data.l[1] = static_cast<long>(std::lround(global_y));
+            event.xclient.data.l[0] = static_cast<long>(global_mouse.x);
+            event.xclient.data.l[1] = static_cast<long>(global_mouse.y);
             event.xclient.data.l[2] = 8; // _NET_WM_MOVERESIZE_MOVE
             event.xclient.data.l[3] = 1; // left mouse button
             event.xclient.data.l[4] = 1; // normal application source
@@ -619,8 +627,8 @@ namespace lfs::vis {
                         titlebar_drag_active_ = false;
                         pending_titlebar_double_click_ = true;
                     } else {
-                        beginTitlebarDrag();
-                        if (native_titlebar_move_available_) {
+                        beginTitlebarDrag(mouse_x, mouse_y);
+                        if (native_titlebar_move_available_ && !titlebar_drag_started_maximized_) {
                             beginTitlebarNativeMove();
                         }
                     }
@@ -640,8 +648,10 @@ namespace lfs::vis {
         case SDL_EVENT_MOUSE_MOTION:
             if (!eventTargetsWindow(event, main_window_id))
                 break;
-            if (titlebar_drag_active_)
+            if (titlebar_drag_active_) {
+                updateTitlebarDrag();
                 break;
+            }
             if (input_controller_) {
                 input_controller_->handleMouseMove(event.motion.x, event.motion.y);
             }
@@ -809,21 +819,38 @@ namespace lfs::vis {
         }
     }
 
-    void WindowManager::beginTitlebarDrag() {
+    void WindowManager::beginTitlebarDrag(const int local_x, const int local_y) {
         if (!window_ || is_fullscreen_)
             return;
 
-        float global_x = 0.0f;
-        float global_y = 0.0f;
-        SDL_GetGlobalMouseState(&global_x, &global_y);
-        titlebar_drag_start_global_ = glm::ivec2(
-            static_cast<int>(std::lround(global_x)),
-            static_cast<int>(std::lround(global_y)));
+        titlebar_drag_start_global_ = globalMousePosition();
+        titlebar_drag_start_local_ = glm::ivec2(local_x, local_y);
+        titlebar_drag_started_maximized_ = isMaximized();
 
-        if (!isMaximized()) {
+        if (!titlebar_drag_started_maximized_) {
             saveBorderlessRestoreGeometry();
         }
         titlebar_drag_active_ = true;
+    }
+
+    void WindowManager::updateTitlebarDrag() {
+        if (!window_ || !titlebar_drag_active_)
+            return;
+
+        if (titlebar_drag_started_maximized_) {
+            if (!titlebarDragMovedEnough())
+                return;
+
+            if (isMaximized()) {
+                restoreMaximizedForTitlebarDrag();
+                if (isMaximized())
+                    return;
+            }
+
+            if (!native_titlebar_move_available_) {
+                updateManualTitlebarMove();
+            }
+        }
     }
 
     void WindowManager::finishTitlebarDrag() {
@@ -991,16 +1018,69 @@ namespace lfs::vis {
         wakeEventLoop();
     }
 
+    void WindowManager::restoreMaximizedForTitlebarDrag() {
+        if (!window_ || !isMaximized())
+            return;
+
+        const glm::ivec2 current_global = globalMousePosition();
+
+        const float anchor_ratio_x = window_size_.x > 0
+                                         ? std::clamp(static_cast<float>(titlebar_drag_start_local_.x) /
+                                                          static_cast<float>(window_size_.x),
+                                                      0.0f,
+                                                      1.0f)
+                                         : 0.5f;
+
+        restoreMaximized("titlebar-drag-restore");
+        if (isMaximized())
+            return;
+
+        int restored_w = 0;
+        int restored_h = 0;
+        SDL_GetWindowSize(window_, &restored_w, &restored_h);
+        if (restored_w <= 0 || restored_h <= 0)
+            return;
+
+        const int pointer_offset_x = std::clamp(
+            static_cast<int>(std::lround(static_cast<float>(restored_w) * anchor_ratio_x)),
+            0,
+            std::max(0, restored_w - 1));
+        const int max_titlebar_offset_y = titlebar_drag_height_px_ > 0
+                                              ? std::min(titlebar_drag_height_px_ - 1, restored_h - 1)
+                                              : restored_h - 1;
+        const int pointer_offset_y = std::clamp(
+            titlebar_drag_start_local_.y,
+            0,
+            std::max(0, max_titlebar_offset_y));
+
+        titlebar_drag_window_offset_ = glm::ivec2(pointer_offset_x, pointer_offset_y);
+        SDL_SetWindowPosition(window_,
+                              current_global.x - titlebar_drag_window_offset_.x,
+                              current_global.y - titlebar_drag_window_offset_.y);
+        wakeEventLoop();
+
+        if (native_titlebar_move_available_) {
+            beginTitlebarNativeMove();
+        }
+    }
+
+    void WindowManager::updateManualTitlebarMove() {
+        if (!window_)
+            return;
+
+        const glm::ivec2 current_global = globalMousePosition();
+
+        SDL_SetWindowPosition(window_,
+                              current_global.x - titlebar_drag_window_offset_.x,
+                              current_global.y - titlebar_drag_window_offset_.y);
+        wakeEventLoop();
+    }
+
     bool WindowManager::titlebarDragMovedEnough() const {
         if (!window_ || !titlebar_drag_active_)
             return false;
 
-        float global_x = 0.0f;
-        float global_y = 0.0f;
-        SDL_GetGlobalMouseState(&global_x, &global_y);
-        const glm::ivec2 current_global(
-            static_cast<int>(std::lround(global_x)),
-            static_cast<int>(std::lround(global_y)));
+        const glm::ivec2 current_global = globalMousePosition();
 
         constexpr int kPointerDragThresholdPx = 4;
         const glm::ivec2 pointer_delta = glm::abs(current_global - titlebar_drag_start_global_);
@@ -1012,13 +1092,8 @@ namespace lfs::vis {
         if (!window_)
             return false;
 
-        float global_x = 0.0f;
-        float global_y = 0.0f;
-        SDL_GetGlobalMouseState(&global_x, &global_y);
-        const SDL_Point global_point{
-            static_cast<int>(std::lround(global_x)),
-            static_cast<int>(std::lround(global_y)),
-        };
+        const glm::ivec2 global_mouse = globalMousePosition();
+        const SDL_Point global_point{global_mouse.x, global_mouse.y};
 
         SDL_DisplayID display_id = SDL_GetDisplayForPoint(&global_point);
         if (display_id == 0) {
