@@ -2307,9 +2307,10 @@ namespace lfs::training {
 
             auto& splat = strategy_->get_model();
 
-            int max_cap = params.optimization.max_cap;
-            if (max_cap < splat.size()) {
-                LOG_WARN("Max cap is less than to {} initial splats {}. Choosing randomly {} splats", max_cap, splat.size(), max_cap);
+            const int max_cap = params.optimization.max_cap;
+            if (max_cap > 0 && max_cap < splat.size()) {
+                LOG_WARN("Max cap ({}) is less than initial splat count ({}), randomly selecting {} splats",
+                         max_cap, splat.size(), max_cap);
                 lfs::core::random_choose(splat, max_cap);
                 syncTrainingSceneTopology(scene_, splat);
             }
