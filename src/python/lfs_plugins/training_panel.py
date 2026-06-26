@@ -413,6 +413,7 @@ class TrainingPanel(Panel):
         self._new_save_step = 7000
         self._auto_scaled_for_cameras = 0
         self._auto_scale_steps_locked = True
+        self._auto_scale_scene_generation = RuntimeState.scene_generation.value
         self._last_state = ""
         self._last_save_steps = None
         self._color_edit_prop = None
@@ -1318,6 +1319,14 @@ class TrainingPanel(Panel):
         )
         self._reactive_binding.set_handle(self._handle).watch(*native_signals)
 
+    def _sync_auto_scale_scene_generation(self):
+        scene_generation = RuntimeState.scene_generation.value
+        if scene_generation == self._auto_scale_scene_generation:
+            return False
+        self._auto_scale_scene_generation = scene_generation
+        self._auto_scaled_for_cameras = 0
+        return True
+
     def _unsubscribe_reactive_state(self):
         self._reactive_binding.close()
 
@@ -1380,6 +1389,7 @@ class TrainingPanel(Panel):
         if not self._handle:
             return False
         self._sync_panel_label()
+        self._sync_auto_scale_scene_generation()
 
         dirty = False
         state = RuntimeState.trainer_state.value
@@ -2341,6 +2351,7 @@ class TrainingPanel(Panel):
         params.remove_eval_step(step)
 
     def _try_auto_scale_steps(self, params):
+        self._sync_auto_scale_scene_generation()
         if not self._auto_scale_steps_locked:
             return False
         scene = lf.get_scene()
