@@ -3396,8 +3396,7 @@ namespace lfs::vis {
                     .is_visible = true,
                     .parent_name = "",
                     .is_group = false,
-                    .node_type = static_cast<int>(core::NodeType::SPLAT)
-                }
+                    .node_type = static_cast<int>(core::NodeType::SPLAT)}
                     .emit();
 
             } catch (const std::exception& e) {

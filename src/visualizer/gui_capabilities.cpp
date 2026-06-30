@@ -13,9 +13,9 @@
 #include "operation/undo_entry.hpp"
 #include "operation/undo_history.hpp"
 #include "rendering/rendering_manager.hpp"
-#include <algorithm>
 #include "scene/scene_manager.hpp"
 #include "visualizer/scene_coordinate_utils.hpp"
+#include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
