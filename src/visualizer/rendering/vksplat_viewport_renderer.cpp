@@ -1196,6 +1196,7 @@ namespace lfs::vis {
                 .sh0 = tensor_ptr(sh0),
                 .shn = tensor_ptr(shn),
                 .deleted = deleted_ptr_src ? tensor_ptr(*deleted_ptr_src) : nullptr,
+                .deleted_version = splat_data.deleted_mask_version(),
                 .means_bytes = tensor_bytes(means),
                 .scaling_bytes = tensor_bytes(scaling),
                 .rotation_bytes = tensor_bytes(rotation),
@@ -1204,6 +1205,27 @@ namespace lfs::vis {
                 .shn_bytes = tensor_bytes(shn),
                 .deleted_bytes = deleted_ptr_src ? tensor_bytes(*deleted_ptr_src) : 0,
             };
+        }
+
+        [[nodiscard]] bool matchesExceptDeletedMask(
+            const VksplatViewportRenderer::ModelInputSnapshot& a,
+            const VksplatViewportRenderer::ModelInputSnapshot& b) {
+            return a.valid() && b.valid() &&
+                   a.model == b.model &&
+                   a.count == b.count &&
+                   a.max_sh_degree == b.max_sh_degree &&
+                   a.means == b.means &&
+                   a.scaling == b.scaling &&
+                   a.rotation == b.rotation &&
+                   a.opacity == b.opacity &&
+                   a.sh0 == b.sh0 &&
+                   a.shn == b.shn &&
+                   a.means_bytes == b.means_bytes &&
+                   a.scaling_bytes == b.scaling_bytes &&
+                   a.rotation_bytes == b.rotation_bytes &&
+                   a.opacity_bytes == b.opacity_bytes &&
+                   a.sh0_bytes == b.sh0_bytes &&
+                   a.shn_bytes == b.shn_bytes;
         }
 
         [[nodiscard]] std::shared_ptr<VulkanExternalTensorStorage> vulkanExternalStorage(
@@ -4225,7 +4247,13 @@ namespace lfs::vis {
         if (!external_layout) {
             return std::unexpected(external_layout.error());
         }
-        const bool input_snapshot_changed = !inputsResident(splat_data, ring_slot);
+        const auto current_input_snapshot = makeModelInputSnapshot(splat_data);
+        const auto& uploaded_input_snapshot = ring_uploaded_[ring_slot];
+        const bool input_snapshot_changed =
+            !uploaded_input_snapshot.valid() || uploaded_input_snapshot != current_input_snapshot;
+        const bool deleted_mask_only_change =
+            input_snapshot_changed &&
+            matchesExceptDeletedMask(uploaded_input_snapshot, current_input_snapshot);
         const bool input_upload_requested = force_upload || input_snapshot_changed;
 
         std::shared_ptr<VulkanExternalTensorStorage> means_storage, sh0_storage, shN_storage,
@@ -4419,7 +4447,7 @@ namespace lfs::vis {
                 buffers_.page_frames.deviceBuffer = {};
                 buffers_.quant_pool = false;
                 buffers_.pool_page_splats = 0;
-                update_input_metadata(input_snapshot_changed);
+                update_input_metadata(input_snapshot_changed && !deleted_mask_only_change);
 
                 // Keep the borrowed storages alive until the frame that binds
                 // them retires: a trainer topology reallocation may drop its
@@ -4467,13 +4495,13 @@ namespace lfs::vis {
 
             {
                 LOG_TIMER("prepareInputs.snapshot");
-                ring_uploaded_[ring_slot] = makeModelInputSnapshot(splat_data);
+                ring_uploaded_[ring_slot] = current_input_snapshot;
             }
             current_input_sh_degree_ = shN_storage ? splat_data.get_max_sh_degree()
                                                    : effective_upload_sh_degree;
             return InputBindingResult{
                 .uses_temporary_upload_slot = false,
-                .model_snapshot_changed = input_snapshot_changed,
+                .model_snapshot_changed = input_snapshot_changed && !deleted_mask_only_change,
             };
         }
 
