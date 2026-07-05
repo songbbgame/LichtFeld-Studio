@@ -1343,8 +1343,8 @@ namespace lfs::python {
                     lfs::rendering::FrameMetadata metadata{
                         .valid = true,
                         .far_plane = settings.depth_clip_enabled
-                                          ? settings.depth_clip_far
-                                          : lfs::rendering::DEFAULT_FAR_PLANE,
+                                         ? settings.depth_clip_far
+                                         : lfs::rendering::DEFAULT_FAR_PLANE,
                         .orthographic = view_info.orthographic,
                         .color_has_alpha = true};
                     auto materialized = engine->materializeGpuFrame(
@@ -1366,8 +1366,8 @@ namespace lfs::python {
                     .focal_length_mm = focal_length_mm,
                     .near_plane = lfs::rendering::DEFAULT_NEAR_PLANE,
                     .far_plane = settings.depth_clip_enabled
-                                      ? settings.depth_clip_far
-                                      : lfs::rendering::DEFAULT_FAR_PLANE,
+                                     ? settings.depth_clip_far
+                                     : lfs::rendering::DEFAULT_FAR_PLANE,
                     .orthographic = view_info.orthographic,
                     .ortho_scale = ortho_scale,
                     .background_color = settings.background_color};
