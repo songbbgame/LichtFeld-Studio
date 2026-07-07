@@ -8,9 +8,11 @@
 
 #include <RmlUi/Core/Types.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -128,6 +130,14 @@ namespace lfs::vis::gui {
         void beginFrameCursorTracking();
         void trackContextFrame(const Rml::Context* context, int window_x, int window_y);
         void setContextNeedsPassiveMouseMoveFrames(const Rml::Context* context, bool needs_frames);
+        // Registers (or clears, on nullopt) the time a context's pending tooltip
+        // is due to appear, so the idle loop can wake exactly at that moment.
+        void setContextTooltipRevealDeadline(
+            const Rml::Context* context,
+            std::optional<std::chrono::steady_clock::time_point> deadline);
+        // Seconds until the earliest pending tooltip is due across all contexts,
+        // or empty when none is counting down.
+        [[nodiscard]] std::optional<double> secondsUntilTooltipReveal() const;
         RmlCursorRequest consumeCursorRequest();
         [[nodiscard]] bool passiveMouseMoveNeedsRender(float window_x, float window_y) const;
 
@@ -184,6 +194,8 @@ namespace lfs::vis::gui {
         std::unordered_map<std::string, Rml::Context*> contexts_;
         std::unordered_map<const Rml::Context*, std::string> context_names_;
         std::unordered_map<const Rml::Context*, TrackedContextFrame> tracked_context_frames_;
+        std::unordered_map<const Rml::Context*, std::chrono::steady_clock::time_point>
+            tooltip_reveal_deadlines_;
         std::vector<VulkanContextCommand> vulkan_queue_;
         std::vector<VulkanContextCommand> vulkan_foreground_queue_;
         SDL_Window* window_ = nullptr;

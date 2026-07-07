@@ -32,12 +32,14 @@
 #include <array>
 #include <cassert>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -370,6 +372,7 @@ namespace lfs::vis::gui {
                 fn(context);
             context_names_.erase(context);
             tracked_context_frames_.erase(context);
+            tooltip_reveal_deadlines_.erase(context);
             Rml::RemoveContext(name);
             contexts_.erase(it);
         }
@@ -422,6 +425,32 @@ namespace lfs::vis::gui {
             return;
         if (auto it = tracked_context_frames_.find(context); it != tracked_context_frames_.end())
             it->second.needs_passive_mouse_move_frames = needs_frames;
+    }
+
+    void RmlUIManager::setContextTooltipRevealDeadline(
+        const Rml::Context* const context,
+        const std::optional<std::chrono::steady_clock::time_point> deadline) {
+        if (!context)
+            return;
+        if (deadline)
+            tooltip_reveal_deadlines_[context] = *deadline;
+        else
+            tooltip_reveal_deadlines_.erase(context);
+    }
+
+    std::optional<double> RmlUIManager::secondsUntilTooltipReveal() const {
+        const auto now = std::chrono::steady_clock::now();
+        std::optional<std::chrono::steady_clock::duration> earliest;
+        for (const auto& [_, deadline] : tooltip_reveal_deadlines_) {
+            if (deadline <= now)
+                continue; // Past-due reveals are painted by a render, not the wait cap.
+            const auto remaining = deadline - now;
+            if (!earliest || remaining < *earliest)
+                earliest = remaining;
+        }
+        if (!earliest)
+            return std::nullopt;
+        return std::chrono::duration<double>(*earliest).count();
     }
 
     RmlCursorRequest RmlUIManager::consumeCursorRequest() {

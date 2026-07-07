@@ -648,7 +648,7 @@ namespace lfs::vis::gui {
             return false;
         if (!document_ || !rml_context_ || last_fbo_w_ <= 0 || last_fbo_h_ <= 0)
             return false;
-        if (render_needed_ || content_dirty_ || animation_active_ || tooltip_.needsFrame())
+        if (render_needed_ || content_dirty_ || animation_active_ || tooltip_.revealDue())
             return false;
         if (!has_theme_signature_ || rml_theme::currentThemeSignature() != last_theme_signature_)
             return false;
@@ -775,9 +775,11 @@ namespace lfs::vis::gui {
                                                             tooltip_.hasActiveState());
         if (tooltip_.apply(body, last_forwarded_mx_, last_forwarded_my_, pw, clamp_h))
             render_needed_ = true;
-        if (manager_)
+        if (manager_) {
             manager_->setContextNeedsPassiveMouseMoveFrames(rml_context_,
                                                             tooltip_.hasActiveState());
+            manager_->setContextTooltipRevealDeadline(rml_context_, tooltip_.revealDeadline());
+        }
     }
 
     void RmlPanelHost::compositeDirectToScreen(const float x, const float y,
