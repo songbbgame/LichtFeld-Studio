@@ -1,4 +1,4 @@
-name: Build LichtFeld v0.5.3 for RTX 50
+name: Build LichtFeld Studio v0.5.3 portable
 
 on:
   workflow_dispatch:
@@ -11,11 +11,8 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  CUDA_PATH: "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.2"
-  CUDNN_ROOT_DIR: "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.2"
-  VCPKG_ROOT: ${{ github.workspace }}\\..\\vcpkg
-  VCPKG_BUILD_TYPE: release
   BUILD_DIR: b
+  CUDA_ROOT: "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8"
 
 jobs:
   build-windows:
@@ -23,84 +20,88 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout LichtFeld Studio v0.5.3
+      - name: Checkout official LichtFeld Studio v0.5.3 source
         uses: actions/checkout@v4
         with:
           repository: MrNeRF/LichtFeld-Studio
-          ref: v0.5.3
-          fetch-depth: 0
+          ref: d8c50c6a3e2273cb74130a6e9023de8d068af52d
+          fetch-depth: 1
           submodules: recursive
 
-      - name: Install CUDA Toolkit 13.2.1
+      - name: Verify source revision
+        shell: pwsh
+        run: |
+          $expected = "d8c50c6a3e2273cb74130a6e9023de8d068af52d"
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "Unexpected source revision: $actual"
+          }
+
+      - name: Install CUDA Toolkit 12.8
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $url = "https://developer.download.nvidia.com/compute/cuda/13.2.1/network_installers/cuda_13.2.1_windows_network.exe"
-          $installer = "$env:RUNNER_TEMP\\cuda-installer.exe"
-          Invoke-WebRequest $url -OutFile $installer
-          $process = Start-Process -FilePath $installer -ArgumentList @("-s", "-toolkit", "-noDisplayDriver") -Wait -PassThru
+          $url = "https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_571.96_windows.exe"
+          $installer = "$env:RUNNER_TEMP\\cuda-12.8.exe"
+          & curl.exe --fail --location --retry 5 --retry-all-errors --output $installer $url
+          if ($LASTEXITCODE -ne 0) {
+            throw "CUDA installer download failed with exit code $LASTEXITCODE."
+          }
+          $process = Start-Process -FilePath $installer -ArgumentList @("-y", "-s", "-accepteula", "-toolkit", "-override", "-noDisplayDriver") -Wait -PassThru
           if ($process.ExitCode -ne 0) {
             throw "CUDA installer failed with exit code $($process.ExitCode)."
           }
 
-      - name: Configure CUDA environment
+      - name: Configure and verify CUDA environment
         shell: pwsh
         run: |
-          $cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
-          if (-not (Test-Path "$cuda\bin\nvcc.exe")) {
-            throw "CUDA 13.2 nvcc was not installed."
+          $cuda = $env:CUDA_ROOT
+          $required = @(
+            "$cuda\\bin\\nvcc.exe",
+            "$cuda\\include\\cusparse.h",
+            "$cuda\\lib\\x64\\cusparse.lib"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Incomplete CUDA installation; missing $path"
+            }
           }
           "CUDA_PATH=$cuda" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "CUDNN_ROOT_DIR=$cuda" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "$cuda\bin" | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
-          & "$cuda\bin\nvcc.exe" --version
+          "CUDA_PATH_V12_8=$cuda" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CUDAToolkit_ROOT=$cuda" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "$cuda\\bin" | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$cuda\\bin\\nvcc.exe" --version
 
-      - name: Install cuDNN 9.24 for CUDA 13
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
-          $url = "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-9.24.0.43_cuda13-archive.zip"
-          $archive = "$env:RUNNER_TEMP\\cudnn.zip"
-          $extract = "$env:RUNNER_TEMP\\cudnn"
-          Invoke-WebRequest $url -OutFile $archive
-          Expand-Archive $archive -DestinationPath $extract
-          $root = Get-ChildItem $extract -Directory | Select-Object -First 1
-          if (-not $root) {
-            throw "Could not find the extracted cuDNN root."
-          }
-          Copy-Item "$($root.FullName)\\bin\\*" "$cuda\\bin" -Recurse -Force
-          Copy-Item "$($root.FullName)\\include\\*" "$cuda\\include" -Recurse -Force
-          Copy-Item "$($root.FullName)\\lib\\x64\\*" "$cuda\\lib\\x64" -Recurse -Force
-          if (-not (Test-Path "$cuda\\include\\cudnn.h")) {
-            throw "cuDNN installation verification failed."
-          }
-
-      - name: Cache vcpkg tool
-        id: cache-vcpkg
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.VCPKG_ROOT }}
-          key: vcpkg-tool-windows-20260710
-
-      - name: Set up latest vcpkg
-        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
-          & "$env:VCPKG_ROOT\\bootstrap-vcpkg.bat" -disableMetrics
-
-      - name: Cache compiled dependencies
+      - name: Restore compiled dependencies
         uses: actions/cache@v4
         with:
           path: ${{ env.BUILD_DIR }}/vcpkg_installed
-          key: lfs-v053-cuda132-sm120-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: lfs-v053-windows-cuda128-portable-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            lfs-v053-windows-cuda128-portable-
 
-      - name: Configure Release build
+      - name: Configure release build
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          cmake -B %BUILD_DIR% -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_PORTABLE=ON -DBUILD_PYTHON_STUBS=OFF -DCMAKE_CUDA_ARCHITECTURES=120 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
+          cmake -B %BUILD_DIR% -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_PORTABLE=ON -DBUILD_PYTHON_STUBS=OFF -DCUDA_DEVICE_DEBUG=OFF
+
+      - name: Verify portable CUDA configuration
+        shell: pwsh
+        run: |
+          $cache = Get-Content -LiteralPath "$env:BUILD_DIR\\CMakeCache.txt"
+          $expected = @(
+            "BUILD_PORTABLE:BOOL=ON",
+            "BUILD_CUDA_PTX_ONLY:BOOL=ON",
+            "BUILD_CUDA_MIN_SM:STRING=75",
+            "CMAKE_CUDA_ARCHITECTURES:STRING=75-virtual"
+          )
+          foreach ($entry in $expected) {
+            if ($cache -notcontains $entry) {
+              throw "Unexpected build configuration; missing '$entry'."
+            }
+          }
+          $expected | ForEach-Object { Write-Host $_ }
 
       - name: Build
         shell: cmd
@@ -108,25 +109,71 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           cmake --build %BUILD_DIR% -j %NUMBER_OF_PROCESSORS%
 
-      - name: Package portable build
+      - name: Print failure diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $paths = @(
+            "$env:BUILD_DIR\\vcpkg-manifest-install.log",
+            "$env:BUILD_DIR\\vcpkg_installed\\vcpkg\\issue_body.md",
+            "$env:BUILD_DIR\\CMakeFiles\\CMakeConfigureLog.yaml",
+            "$env:BUILD_DIR\\CMakeFiles\\CMakeError.log",
+            "$env:BUILD_DIR\\CMakeCache.txt"
+          )
+          foreach ($path in $paths) {
+            if (Test-Path -LiteralPath $path) {
+              Write-Host "::group::$path"
+              Get-Content -LiteralPath $path -Tail 400
+              Write-Host "::endgroup::"
+            }
+          }
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LichtFeld-v0.5.3-build-diagnostics-${{ github.run_number }}
+          if-no-files-found: ignore
+          retention-days: 3
+          path: |
+            ${{ env.BUILD_DIR }}/CMakeCache.txt
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeError.log
+            ${{ env.BUILD_DIR }}/vcpkg-manifest-install.log
+            ${{ env.BUILD_DIR }}/vcpkg_installed/vcpkg/issue_body.md
+            ${{ env.BUILD_DIR }}/vcpkg_installed/vcpkg/blds/**/*.log
+
+      - name: Package and verify portable build
+        id: package
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           cmake --install $env:BUILD_DIR --prefix dist
-          $sha = (git rev-parse --short HEAD).Trim()
-          $name = "LichtFeld-Studio-v0.5.3-windows-cuda13.2-sm120-$sha.zip"
-          Compress-Archive -Path "dist\\*" -DestinationPath $name
-          $hash = (Get-FileHash -Algorithm SHA256 $name).Hash.ToLowerInvariant()
+          $exe = "dist\\bin\\LichtFeld-Studio.exe"
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Portable executable was not installed at $exe."
+          }
+          $runtimeDlls = Get-ChildItem -LiteralPath "dist\\bin" -Filter "*.dll" -File
+          if ($runtimeDlls.Count -eq 0) {
+            throw "Portable package contains no runtime DLLs."
+          }
+          $shortSha = (git rev-parse --short HEAD).Trim()
+          $name = "LichtFeld-Studio-v0.5.3-windows-cuda12.8-portable-$shortSha.zip"
+          Compress-Archive -Path "dist\\*" -DestinationPath $name -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $name).Hash.ToLowerInvariant()
           "$hash  $name" | Set-Content "$name.sha256" -Encoding ascii
-          "PACKAGE_NAME=$name" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "package_name=$name" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Package: $name"
+          Write-Host "Size: $((Get-Item -LiteralPath $name).Length) bytes"
+          Write-Host "SHA256: $hash"
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: LichtFeld-Studio-v0.5.3-windows-cuda13.2-sm120
+          name: LichtFeld-Studio-v0.5.3-windows-portable
           path: |
-            ${{ env.PACKAGE_NAME }}
-            ${{ env.PACKAGE_NAME }}.sha256
+            ${{ steps.package.outputs.package_name }}
+            ${{ steps.package.outputs.package_name }}.sha256
           compression-level: 0
-          retention-days: 14
+          retention-days: 1
           if-no-files-found: error
