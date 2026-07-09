@@ -1,0 +1,131 @@
+name: Build LichtFeld v0.5.3 for RTX 50
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-windows-portable.yml"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CUDA_PATH: "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.2"
+  CUDNN_ROOT_DIR: "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.2"
+  VCPKG_ROOT: ${{ github.workspace }}\\..\\vcpkg
+  VCPKG_BUILD_TYPE: release
+  BUILD_DIR: b
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout LichtFeld Studio v0.5.3
+        uses: actions/checkout@v4
+        with:
+          ref: v0.5.3
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install CUDA Toolkit 13.2.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://developer.download.nvidia.com/compute/cuda/13.2.1/network_installers/cuda_13.2.1_windows_network.exe"
+          $installer = "$env:RUNNER_TEMP\\cuda-installer.exe"
+          Invoke-WebRequest $url -OutFile $installer
+          $process = Start-Process -FilePath $installer -ArgumentList @("-s", "-toolkit", "-noDisplayDriver") -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "CUDA installer failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Configure CUDA environment
+        shell: pwsh
+        run: |
+          $cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
+          if (-not (Test-Path "$cuda\bin\nvcc.exe")) {
+            throw "CUDA 13.2 nvcc was not installed."
+          }
+          "CUDA_PATH=$cuda" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CUDNN_ROOT_DIR=$cuda" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "$cuda\bin" | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$cuda\bin\nvcc.exe" --version
+
+      - name: Install cuDNN 9.24 for CUDA 13
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
+          $url = "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-9.24.0.43_cuda13-archive.zip"
+          $archive = "$env:RUNNER_TEMP\\cudnn.zip"
+          $extract = "$env:RUNNER_TEMP\\cudnn"
+          Invoke-WebRequest $url -OutFile $archive
+          Expand-Archive $archive -DestinationPath $extract
+          $root = Get-ChildItem $extract -Directory | Select-Object -First 1
+          if (-not $root) {
+            throw "Could not find the extracted cuDNN root."
+          }
+          Copy-Item "$($root.FullName)\\bin\\*" "$cuda\\bin" -Recurse -Force
+          Copy-Item "$($root.FullName)\\include\\*" "$cuda\\include" -Recurse -Force
+          Copy-Item "$($root.FullName)\\lib\\x64\\*" "$cuda\\lib\\x64" -Recurse -Force
+          if (-not (Test-Path "$cuda\\include\\cudnn.h")) {
+            throw "cuDNN installation verification failed."
+          }
+
+      - name: Cache vcpkg tool
+        id: cache-vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}
+          key: vcpkg-tool-windows-20260710
+
+      - name: Set up latest vcpkg
+        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
+          & "$env:VCPKG_ROOT\\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Cache compiled dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILD_DIR }}/vcpkg_installed
+          key: lfs-v053-cuda132-sm120-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Configure Release build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -B %BUILD_DIR% -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_PORTABLE=ON -DBUILD_PYTHON_STUBS=OFF -DCMAKE_CUDA_ARCHITECTURES=120
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake --build %BUILD_DIR% -j %NUMBER_OF_PROCESSORS%
+
+      - name: Package portable build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cmake --install $env:BUILD_DIR --prefix dist
+          $sha = (git rev-parse --short HEAD).Trim()
+          $name = "LichtFeld-Studio-v0.5.3-windows-cuda13.2-sm120-$sha.zip"
+          Compress-Archive -Path "dist\\*" -DestinationPath $name
+          $hash = (Get-FileHash -Algorithm SHA256 $name).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content "$name.sha256" -Encoding ascii
+          "PACKAGE_NAME=$name" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: LichtFeld-Studio-v0.5.3-windows-cuda13.2-sm120
+          path: |
+            ${{ env.PACKAGE_NAME }}
+            ${{ env.PACKAGE_NAME }}.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
