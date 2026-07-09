@@ -26,6 +26,7 @@ jobs:
       - name: Checkout LichtFeld Studio v0.5.3
         uses: actions/checkout@v4
         with:
+          repository: MrNeRF/LichtFeld-Studio
           ref: v0.5.3
           fetch-depth: 0
           submodules: recursive
