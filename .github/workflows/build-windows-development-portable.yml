@@ -1,0 +1,259 @@
+name: Build LichtFeld Studio development portable
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-windows-development-portable.yml"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  SOURCE_SHA: "b607452dd9db0400d7aeaf65de85d39f5939abdd"
+  BUILD_DIR: b
+  VCPKG_ROOT: ${{ github.workspace }}\\..\\vcpkg
+  VCPKG_BUILD_TYPE: release
+  CUDA_PATH: "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8"
+  CUDNN_ROOT_DIR: "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8"
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout fixed upstream development source
+        uses: actions/checkout@v4
+        with:
+          repository: MrNeRF/LichtFeld-Studio
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Verify source revision
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:SOURCE_SHA) {
+            throw "Unexpected source revision: $actual"
+          }
+
+      - name: Install CUDA Toolkit 12.8
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_571.96_windows.exe"
+          $installer = "$env:RUNNER_TEMP\\cuda-12.8.exe"
+          & curl.exe --fail --location --retry 5 --retry-all-errors --output $installer $url
+          if ($LASTEXITCODE -ne 0) {
+            throw "CUDA installer download failed with exit code $LASTEXITCODE."
+          }
+          $process = Start-Process -FilePath $installer -ArgumentList @("-y", "-s", "-accepteula", "-toolkit", "-override", "-noDisplayDriver") -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "CUDA installer failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Configure and verify CUDA environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $required = @(
+            "$env:CUDA_PATH\\bin\\nvcc.exe",
+            "$env:CUDA_PATH\\include\\cusparse.h",
+            "$env:CUDA_PATH\\lib\\x64\\cusparse.lib"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Incomplete CUDA installation; missing $path"
+            }
+          }
+          "CUDA_PATH=$env:CUDA_PATH" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CUDA_PATH_V12_8=$env:CUDA_PATH" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CUDNN_ROOT_DIR=$env:CUDNN_ROOT_DIR" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "$env:CUDA_PATH\\bin" | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$env:CUDA_PATH\\bin\\nvcc.exe" --version
+
+      - name: Ensure cuDNN 9 is available
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $include = Join-Path $env:CUDA_PATH "include\\cudnn.h"
+          $libs = @(Get-ChildItem (Join-Path $env:CUDA_PATH "lib\\x64") -Filter "cudnn*.lib" -ErrorAction SilentlyContinue)
+          $dlls = @(Get-ChildItem (Join-Path $env:CUDA_PATH "bin") -Filter "cudnn*64_9.dll" -ErrorAction SilentlyContinue)
+          if (-not ((Test-Path $include) -and $libs.Count -gt 0 -and $dlls.Count -gt 0)) {
+            $url = "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-9.5.0.50_cuda12-archive.zip"
+            Invoke-WebRequest $url -OutFile cudnn.zip
+            Expand-Archive cudnn.zip -DestinationPath cudnn
+            $root = Get-ChildItem cudnn -Directory | Select-Object -First 1
+            if (-not $root) {
+              throw "Could not find extracted cuDNN archive root."
+            }
+            Copy-Item "$($root.FullName)\\bin\\*" (Join-Path $env:CUDA_PATH "bin") -Recurse -Force
+            Copy-Item "$($root.FullName)\\include\\*" (Join-Path $env:CUDA_PATH "include") -Recurse -Force
+            Copy-Item "$($root.FullName)\\lib\\x64\\*" (Join-Path $env:CUDA_PATH "lib\\x64") -Recurse -Force
+          }
+          $libs = @(Get-ChildItem (Join-Path $env:CUDA_PATH "lib\\x64") -Filter "cudnn*.lib" -ErrorAction SilentlyContinue)
+          $dlls = @(Get-ChildItem (Join-Path $env:CUDA_PATH "bin") -Filter "cudnn*64_9.dll" -ErrorAction SilentlyContinue)
+          if (-not (Test-Path $include) -or $libs.Count -eq 0 -or $dlls.Count -eq 0) {
+            throw "cuDNN 9 setup is incomplete."
+          }
+
+      - name: Cache vcpkg tool
+        id: cache-vcpkg-tool
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}
+          key: vcpkg-tool-${{ runner.os }}-2026-03-12
+          restore-keys: vcpkg-tool-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        if: steps.cache-vcpkg-tool.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Push-Location ..
+          git clone https://github.com/microsoft/vcpkg.git
+          & .\\vcpkg\\bootstrap-vcpkg.bat -disableMetrics
+          Pop-Location
+
+      - name: Cache compiled dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILD_DIR }}/vcpkg_installed
+          key: lfs-development-windows-cuda128-portable-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: lfs-development-windows-cuda128-portable-
+
+      - name: Configure release build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cmakeArgs = "-B $env:BUILD_DIR -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_PORTABLE=ON -DBUILD_PYTHON_STUBS=OFF"
+          $retryablePatterns = @("status code 5\\d\\d", "timed out", "timeout", "connection reset", "failed to connect", "temporarily unavailable", "tls", "ssl")
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Configure attempt $attempt/3"
+            cmd /c "call `"C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Auxiliary\\Build\\vcvars64.bat`" && cmake $cmakeArgs"
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            $shouldRetry = $false
+            $manifestLog = Join-Path $env:BUILD_DIR "vcpkg-manifest-install.log"
+            if (Test-Path $manifestLog) {
+              foreach ($pattern in $retryablePatterns) {
+                if (Select-String -Path $manifestLog -Pattern $pattern -Quiet) {
+                  $shouldRetry = $true
+                  break
+                }
+              }
+            }
+            if (-not $shouldRetry -or $attempt -eq 3) {
+              exit $LASTEXITCODE
+            }
+            if (Test-Path $env:BUILD_DIR) {
+              Remove-Item -Recurse -Force $env:BUILD_DIR
+            }
+            Start-Sleep -Seconds (15 * $attempt)
+          }
+
+      - name: Verify portable CUDA configuration
+        shell: pwsh
+        run: |
+          $cache = Get-Content -LiteralPath "$env:BUILD_DIR\\CMakeCache.txt"
+          $expected = @(
+            "BUILD_PORTABLE:BOOL=ON",
+            "BUILD_CUDA_PTX_ONLY:BOOL=ON",
+            "BUILD_CUDA_MIN_SM:STRING=75",
+            "CMAKE_CUDA_ARCHITECTURES:STRING=75-virtual"
+          )
+          foreach ($entry in $expected) {
+            if ($cache -notcontains $entry) {
+              throw "Unexpected build configuration; missing '$entry'."
+            }
+          }
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake --build %BUILD_DIR% -j %NUMBER_OF_PROCESSORS%
+
+      - name: Print failure diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $paths = @(
+            "$env:BUILD_DIR\\vcpkg-manifest-install.log",
+            "$env:BUILD_DIR\\vcpkg_installed\\vcpkg\\issue_body.md",
+            "$env:BUILD_DIR\\CMakeFiles\\CMakeConfigureLog.yaml",
+            "$env:BUILD_DIR\\CMakeFiles\\CMakeError.log",
+            "$env:BUILD_DIR\\CMakeFiles\\CMakeOutput.log",
+            "$env:BUILD_DIR\\CMakeCache.txt"
+          )
+          foreach ($path in $paths) {
+            if (Test-Path -LiteralPath $path) {
+              Write-Host "::group::$path"
+              Get-Content -LiteralPath $path -Tail 400
+              Write-Host "::endgroup::"
+            }
+          }
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LichtFeld-development-build-diagnostics-${{ github.run_number }}
+          if-no-files-found: ignore
+          retention-days: 3
+          path: |
+            ${{ env.BUILD_DIR }}/CMakeCache.txt
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeError.log
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeOutput.log
+            ${{ env.BUILD_DIR }}/vcpkg-manifest-install.log
+            ${{ env.BUILD_DIR }}/vcpkg_installed/vcpkg/issue_body.md
+            ${{ env.BUILD_DIR }}/vcpkg_installed/vcpkg/blds/**/*.log
+
+      - name: Package and verify portable build
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cmake --install $env:BUILD_DIR --prefix dist
+          $exe = "dist\\bin\\LichtFeld-Studio.exe"
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Portable executable was not installed at $exe."
+          }
+          $runtimeDlls = @(Get-ChildItem -LiteralPath "dist\\bin" -Filter "*.dll" -File)
+          if ($runtimeDlls.Count -eq 0) {
+            throw "Portable package contains no runtime DLLs."
+          }
+          $cudnnDlls = @(Get-ChildItem -LiteralPath "dist\\bin" -Filter "cudnn*64_9.dll" -File)
+          if ($cudnnDlls.Count -eq 0) {
+            throw "Portable package contains no cuDNN runtime DLLs."
+          }
+          $nvjpeg2k = "dist\\bin\\nvjpeg2k_0.dll"
+          $nvjpeg2kExtensions = @(Get-ChildItem -LiteralPath "dist\\bin\\extensions" -Filter "nvjpeg2k_ext*.dll" -File -ErrorAction SilentlyContinue)
+          if (-not (Test-Path -LiteralPath $nvjpeg2k) -or $nvjpeg2kExtensions.Count -eq 0) {
+            throw "Portable package contains no complete nvJPEG2000 runtime."
+          }
+          $shortSha = (git rev-parse --short HEAD).Trim()
+          $dateStamp = Get-Date -AsUTC -Format "yyyyMMdd"
+          $name = "LichtFeld-Studio-windows-v0.5.3.dev$dateStamp+$shortSha-portable.zip"
+          Compress-Archive -Path "dist\\*" -DestinationPath $name -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $name).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content "$name.sha256" -Encoding ascii
+          "package_name=$name" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Package: $name"
+          Write-Host "Size: $((Get-Item -LiteralPath $name).Length) bytes"
+          Write-Host "SHA256: $hash"
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: LichtFeld-Studio-development-windows-portable
+          path: |
+            ${{ steps.package.outputs.package_name }}
+            ${{ steps.package.outputs.package_name }}.sha256
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
