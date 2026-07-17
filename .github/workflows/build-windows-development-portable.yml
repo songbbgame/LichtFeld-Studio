@@ -118,11 +118,14 @@ jobs:
           Pop-Location
 
       - name: Cache compiled dependencies
-        uses: actions/cache@v4
+        id: cache-compiled-dependencies
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.BUILD_DIR }}/vcpkg_installed
           key: lfs-development-windows-cuda128-portable-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: lfs-development-windows-cuda128-portable-
+          restore-keys: |
+            lfs-development-windows-cuda128-portable-
+            lfs-v053-windows-cuda128-portable-
 
       - name: Configure release build
         shell: pwsh
@@ -176,6 +179,13 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           cmake --build %BUILD_DIR% -j %NUMBER_OF_PROCESSORS%
+
+      - name: Save compiled dependencies
+        if: steps.cache-compiled-dependencies.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.BUILD_DIR }}/vcpkg_installed
+          key: ${{ steps.cache-compiled-dependencies.outputs.cache-primary-key }}
 
       - name: Print failure diagnostics
         if: failure()
@@ -232,7 +242,7 @@ jobs:
             throw "Portable package contains no cuDNN runtime DLLs."
           }
           $nvjpeg2k = "dist\\bin\\nvjpeg2k_0.dll"
-          $nvjpeg2kExtensions = @(Get-ChildItem -LiteralPath "dist\\bin\\extensions" -Filter "nvjpeg2k_ext*.dll" -File -ErrorAction SilentlyContinue)
+          $nvjpeg2kExtensions = @(Get-ChildItem -LiteralPath "dist\\extensions" -Filter "nvjpeg2k_ext*.dll" -File -ErrorAction SilentlyContinue)
           if (-not (Test-Path -LiteralPath $nvjpeg2k) -or $nvjpeg2kExtensions.Count -eq 0) {
             throw "Portable package contains no complete nvJPEG2000 runtime."
           }
